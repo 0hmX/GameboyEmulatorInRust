@@ -75,7 +75,6 @@ pub fn main() -> Result<(), String> {
         }
     }
 
-    // Remove old warning message since we now handle loading properly
     println!("Initializing CPU...");
     let mut cpu = Cpu::new(&mut memory_bus, false); // Assuming no boot ROM support yet
 

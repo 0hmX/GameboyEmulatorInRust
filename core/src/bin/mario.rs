@@ -28,7 +28,7 @@ const CYCLES_PER_FRAME: u32 = (CPU_FREQ_HZ / TARGET_FPS as f64) as u32;
 const GB_WIDTH: u32 = 160;
 const GB_HEIGHT: u32 = 144;
 const GB_SCALE_FACTOR: u32 = 4; // Scale factor for the main GB screen
-const VRAM_DEBUG_SCALE_FACTOR: u32 = 2; // Scale factor for the VRAM debug view
+const VRAM_DEBUG_SCALE_FACTOR: u32 = 4; // Scale factor for the VRAM debug view
 const PADDING: u32 = 10; // Pixels between GB screen and VRAM view
 
 // Calculate dimensions that *can* be const
@@ -206,13 +206,13 @@ pub fn main() -> Result<(), String> {
                 }
                  Event::KeyDown { keycode: Some(key), repeat: false, .. } => {
                     // Assuming memory_bus has a public joypad field or a method
-                    memory_bus.joypad.handle_key_down(key);
+                    // memory_bus.joypad.handle_key_down(key);
                     // Need to potentially request a Joypad interrupt if enabled bits match
-                    memory_bus.request_interrupt(4); // Joypad is bit 4 in IF/IE
+                    // memory_bus.request_interrupt(4); // Joypad is bit 4 in IF/IE
                  }
                  Event::KeyUp { keycode: Some(key), repeat: false, .. } => {
                      // Assuming memory_bus has a public joypad field or a method
-                     memory_bus.joypad.handle_key_up(key);
+                    //  memory_bus.joypad.handle_key_up(key);
                  }
                 _ => {}
             }

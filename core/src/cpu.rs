@@ -1,5 +1,6 @@
-use crate::memory_bus::MemoryBus;
+use crate::memory_bus::MemoryBus; // Assuming this path is correct
 
+// --- Constants remain the same ---
 // Define bit positions within the F register
 const FLAG_Z_POS: u8 = 7; // Zero flag
 const FLAG_N_POS: u8 = 6; // Subtract flag (BCD)
@@ -23,7 +24,8 @@ const IE_REGISTER: u16 = 0xFFFF; // Interrupt Enable Register address
 const IF_REGISTER: u16 = 0xFF0F; // Interrupt Flag Register address
 
 /// Represents the Game Boy CPU (Sharp LR35902).
-pub struct Cpu<'a> {
+// No longer needs lifetime 'a as memory_bus is passed in methods
+pub struct Cpu {
     // Registers
     a: u8, // Accumulator
     f: u8, // Flags register (ZNHC----)
@@ -37,7 +39,7 @@ pub struct Cpu<'a> {
     sp: u16, // Stack Pointer
     pc: u16, // Program Counter
 
-    memory_bus: &'a mut MemoryBus,
+    // memory_bus: &'a mut MemoryBus, <-- REMOVED
 
     ime: bool,        // Interrupt Master Enable flag (true=enabled, false=disabled)
     halted: bool,     // Is the CPU currently halted?
@@ -47,23 +49,24 @@ pub struct Cpu<'a> {
     total_cycles: u64 // For tracking total cycles executed (useful for timing)
 }
 
-impl<'a> Cpu<'a> {
+// No longer needs lifetime 'a
+impl Cpu {
     /// Creates a new CPU instance.
-    /// `memory_bus`: A mutable reference to the MemoryBus instance.
     /// `skip_boot_rom`: If true, initializes registers to post-boot values and PC to 0x0100.
     ///                  If false, initializes for boot ROM execution (PC=0x0000).
-    pub fn new(memory_bus: &'a mut MemoryBus, skip_boot_rom: bool) -> Self {
+    /// **Note:** Does NOT initialize I/O registers if skipping boot ROM. This must be
+    ///         done externally by the caller using a MemoryBus reference.
+    pub fn new(skip_boot_rom: bool) -> Self {
         // Values based on PanDocs - Post-Boot ROM values
         let (init_a, init_f, init_bc, init_de, init_hl, init_pc) = if skip_boot_rom {
             // Assuming DMG values after boot rom. CGB values differ slightly (A=0x11)
-            // TODO: Differentiate between DMG/CGB initialization if needed
             (0x01, 0xB0, 0x0013, 0x00D8, 0x014D, 0x0100)
         } else {
             // Initial values before boot ROM runs (usually zeroed)
             (0x00, 0x00, 0x0000, 0x0000, 0x0000, 0x0000)
         };
 
-        let mut cpu = Cpu {
+        let cpu = Cpu {
             a: init_a,
             f: init_f,
             b: (init_bc >> 8) as u8,
@@ -76,7 +79,7 @@ impl<'a> Cpu<'a> {
             sp: 0xFFFE,  // Initial stack pointer is standard
             pc: init_pc,
 
-            memory_bus,
+            // memory_bus, <-- REMOVED
             ime: false, // IME is disabled initially
             halted: false,
             stop_requested: false,
@@ -84,66 +87,29 @@ impl<'a> Cpu<'a> {
             total_cycles: 0,
         };
 
-        // If skipping boot ROM, we need to manually set some I/O registers
-        // that the boot ROM would normally initialize.
-        if skip_boot_rom {
-             // Essential initial I/O register values (DMG)
-             cpu.memory_bus.write_byte(0xFF05, 0x00); // TIMA
-             cpu.memory_bus.write_byte(0xFF06, 0x00); // TMA
-             cpu.memory_bus.write_byte(0xFF07, 0x00); // TAC
-             cpu.memory_bus.write_byte(0xFF10, 0x80); // NR10
-             cpu.memory_bus.write_byte(0xFF11, 0xBF); // NR11
-             cpu.memory_bus.write_byte(0xFF12, 0xF3); // NR12
-             cpu.memory_bus.write_byte(0xFF14, 0xBF); // NR14
-             cpu.memory_bus.write_byte(0xFF16, 0x3F); // NR21
-             cpu.memory_bus.write_byte(0xFF17, 0x00); // NR22
-             cpu.memory_bus.write_byte(0xFF19, 0xBF); // NR24
-             cpu.memory_bus.write_byte(0xFF1A, 0x7F); // NR30
-             cpu.memory_bus.write_byte(0xFF1B, 0xFF); // NR31
-             cpu.memory_bus.write_byte(0xFF1C, 0x9F); // NR32
-             cpu.memory_bus.write_byte(0xFF1E, 0xBF); // NR33
-             cpu.memory_bus.write_byte(0xFF20, 0xFF); // NR41
-             cpu.memory_bus.write_byte(0xFF21, 0x00); // NR42
-             cpu.memory_bus.write_byte(0xFF22, 0x00); // NR43
-             cpu.memory_bus.write_byte(0xFF23, 0xBF); // NR44
-             cpu.memory_bus.write_byte(0xFF24, 0x77); // NR50
-             cpu.memory_bus.write_byte(0xFF25, 0xF3); // NR51
-             cpu.memory_bus.write_byte(0xFF26, 0xF1); // NR52 - F1 for DMG, F0 for SGB
-             cpu.memory_bus.write_byte(0xFF40, 0x91); // LCDC
-             cpu.memory_bus.write_byte(0xFF41, 0x85); // STAT - Initial mode 1? Check PanDocs
-             cpu.memory_bus.write_byte(0xFF42, 0x00); // SCY
-             cpu.memory_bus.write_byte(0xFF43, 0x00); // SCX
-             cpu.memory_bus.write_byte(0xFF45, 0x00); // LYC
-             cpu.memory_bus.write_byte(0xFF47, 0xFC); // BGP
-             cpu.memory_bus.write_byte(0xFF48, 0xFF); // OBP0
-             cpu.memory_bus.write_byte(0xFF49, 0xFF); // OBP1
-             cpu.memory_bus.write_byte(0xFF4A, 0x00); // WY
-             cpu.memory_bus.write_byte(0xFF4B, 0x00); // WX
-             cpu.memory_bus.write_byte(IE_REGISTER, 0x00);  // IE
-             // IF (0xFF0F) starts at 0xE1 post-boot, indicating VBLANK occurred?
-             // Boot ROM leaves it as 0xE1 (or similar like E0). Let's start clean for simplicity?
-             cpu.memory_bus.write_byte(IF_REGISTER, 0x00); // IF
-             // Write 0x01 to 0xFF50 to disable boot ROM mapping
-             // The MemoryBus implementation should handle this if needed.
-             cpu.memory_bus.write_byte(0xFF50, 0x01);
-        }
+        // IMPORTANT: The I/O register initialization that was here when skip_boot_rom=true
+        // has been removed because Cpu::new no longer has access to the MemoryBus.
+        // The caller of Cpu::new MUST now perform this initialization separately
+        // if skip_boot_rom is true. Example:
+        // let mut cpu = Cpu::new(true);
+        // initialize_io_registers(&mut memory_bus); // You'd need to write this function
 
         cpu
     }
 
     /// Executes a single CPU step: handles interrupts, then fetches and executes an instruction.
     /// Returns the number of **T-cycles** (clock cycles) consumed in this step.
-    pub fn step(&mut self) -> u8 {
-        // --- Handle pending EI instruction (enable IME after the instruction *following* EI) ---
+    /// Requires mutable access to the MemoryBus.
+    pub fn step(&mut self, memory_bus: &mut MemoryBus) -> u8 {
+        // --- Handle pending EI instruction ---
         if self.ime_scheduled {
             self.ime = true;
             self.ime_scheduled = false;
         }
 
         // --- Check for and Handle Interrupts ---
-        let interrupt_cycles = self.handle_interrupts();
+        let interrupt_cycles = self.handle_interrupts(memory_bus);
         if interrupt_cycles > 0 {
-            // Interrupt occurred, took precedence over HALT/instruction execution
             self.halted = false; // Wake up if halted
             self.stop_requested = false; // Wake up if stopped
             self.total_cycles += interrupt_cycles as u64;
@@ -152,50 +118,72 @@ impl<'a> Cpu<'a> {
 
         // --- Handle HALT/STOP state ---
         if self.halted || self.stop_requested {
-             // CPU is idle, consuming time. Does not fetch/execute.
-             // Real hardware might enter low power in STOP.
-             // TODO: Need logic for STOP mode exit (usually Joypad press)
              self.total_cycles += 4;
              return 4; // Consume 1 M-cycle (4 T-cycles)
         }
 
         // --- Fetch ---
-        let opcode = self.fetch_byte();
+        // Need to handle potential HALT bug: If HALT bug occurs, PC doesn't increment.
+        // Read the instruction *before* checking the halt bug condition for PC handling.
+        let opcode_pc = self.pc; // Store PC before fetch for potential halt bug
+        let opcode = self.fetch_byte(memory_bus);
+
+        // Check for HALT bug *after* fetching opcode but *before* executing
+        let ie = memory_bus.read_byte(IE_REGISTER);
+        let iflags = memory_bus.read_byte(IF_REGISTER);
+        let halt_bug_condition = self.halted && !self.ime && (ie & iflags & 0x1F) != 0; // Check only enabled+flagged interrupts
+
+        if halt_bug_condition {
+            // HALT bug: PC does not increment for the fetched opcode byte.
+            self.pc = opcode_pc;
+            // The instruction fetched (opcode) will be executed anyway in the next step if still halted.
+            // The 'halted' state remains true until an actual interrupt service routine begins.
+             println!("WARN: HALT bug triggered! PC kept at {:04X}", self.pc);
+             // Fall through to execute NOP-like behaviour (just cycle counting)
+             self.total_cycles += 4; // Consume cycles for the "skipped" instruction fetch/decode
+             return 4;
+        }
+
 
         // --- Decode & Execute ---
-        let instruction_cycles = self.execute(opcode);
+        let instruction_cycles = self.execute(opcode, memory_bus);
         self.total_cycles += instruction_cycles as u64;
 
         instruction_cycles
     }
 
+
     /// Checks for pending and enabled interrupts and handles the highest priority one.
     /// Returns the number of cycles taken if an interrupt was handled (usually 20), or 0 otherwise.
-    fn handle_interrupts(&mut self) -> u8 {
-        if !self.ime && !self.halted { // Interrupts only handled if IME is on, *unless* HALTed
-            return 0;
-        }
+    fn handle_interrupts(&mut self, memory_bus: &mut MemoryBus) -> u8 {
+         // Interrupts are checked even if IME is false *if* the CPU is HALTed
+         // because an interrupt can wake the CPU from HALT.
+         let check_interrupts = self.ime || self.halted;
+         if !check_interrupts {
+             return 0;
+         }
 
         // Read Interrupt Flag (IF) and Interrupt Enable (IE) registers
-        let if_flags = self.memory_bus.read_byte(IF_REGISTER);
-        let ie_flags = self.memory_bus.read_byte(IE_REGISTER);
+        let if_flags = memory_bus.read_byte(IF_REGISTER);
+        let ie_flags = memory_bus.read_byte(IE_REGISTER);
 
         // Check which interrupts are both requested (IF) and enabled (IE)
-        let pending = if_flags & ie_flags;
+        let pending = if_flags & ie_flags & 0x1F; // Mask to relevant 5 bits
 
         if pending == 0 {
             return 0; // No pending enabled interrupts
         }
 
-        // --- Interrupt occurred ---
+        // --- Interrupt pending ---
 
-        // If CPU was HALTed, it wakes up now, even if IME is off.
-        // However, the interrupt handler is only executed if IME *was* on.
-        if self.halted {
-             self.halted = false;
-             if !self.ime {
-                  return 0; // Wake from HALT but don't service interrupt if IME is off
-             }
+        // If CPU was HALTed, it wakes up now.
+        // The actual interrupt service routine is only run if IME was enabled.
+        let was_halted = self.halted;
+        self.halted = false; // Wake up regardless
+
+        if !self.ime {
+            // Wake from HALT (if halted), but don't service interrupt if IME is off
+            return if was_halted { 4 } else { 0 }; // Return cycles for waking? Or just 0? Let step handle cycles. Let's return 0.
         }
 
         // If we get here, IME must be true. Disable it immediately.
@@ -207,34 +195,29 @@ impl<'a> Cpu<'a> {
         let interrupt_bit;
 
         if pending & 0x01 != 0 { // VBlank (Priority 0)
-            vector = VBLANK_VECTOR;
-            interrupt_bit = 0;
+            vector = VBLANK_VECTOR; interrupt_bit = 0;
         } else if pending & 0x02 != 0 { // LCD STAT (Priority 1)
-            vector = LCD_STAT_VECTOR;
-            interrupt_bit = 1;
+            vector = LCD_STAT_VECTOR; interrupt_bit = 1;
         } else if pending & 0x04 != 0 { // Timer (Priority 2)
-            vector = TIMER_VECTOR;
-            interrupt_bit = 2;
+            vector = TIMER_VECTOR; interrupt_bit = 2;
         } else if pending & 0x08 != 0 { // Serial (Priority 3)
-            vector = SERIAL_VECTOR;
-            interrupt_bit = 3;
+            vector = SERIAL_VECTOR; interrupt_bit = 3;
         } else if pending & 0x10 != 0 { // Joypad (Priority 4)
-            vector = JOYPAD_VECTOR;
-            interrupt_bit = 4;
+            vector = JOYPAD_VECTOR; interrupt_bit = 4;
         } else {
-            // Should not happen if pending > 0
-            return 0;
+            unreachable!("Pending was > 0 but no specific bit found?");
         }
 
         // Reset the corresponding bit in the IF register
-        let current_if = self.memory_bus.read_byte(IF_REGISTER);
-        self.memory_bus.write_byte(IF_REGISTER, current_if & !(1 << interrupt_bit));
+        let current_if = memory_bus.read_byte(IF_REGISTER);
+        memory_bus.write_byte(IF_REGISTER, current_if & !(1 << interrupt_bit));
 
         // Interrupt Handling Sequence takes 5 M-cycles (20 T-cycles):
-        // 2 M-cycles delay/internal processing
+        // 2 M-cycles delay/internal processing (simulated by cycle count)
         // 2 M-cycles pushing PC high byte, then low byte
         // 1 M-cycle jumping to the vector address
-        self.push_word(self.pc);
+        // Needs the memory_bus for push_word
+        self.push_word(self.pc, memory_bus);
         self.pc = vector;
 
         20 // Cycles consumed by handling the interrupt
@@ -242,41 +225,43 @@ impl<'a> Cpu<'a> {
 
 
     /// Fetches the next byte from memory at the PC and increments the PC.
-    /// This uses the integrated MemoryBus.
-    fn fetch_byte(&mut self) -> u8 {
-        let byte = self.memory_bus.read_byte(self.pc);
+    fn fetch_byte(&mut self, memory_bus: &mut MemoryBus) -> u8 {
+        let byte = memory_bus.read_byte(self.pc);
+        // Handle HALT bug - PC increment might be skipped by caller (`step`)
+        // So we increment it here normally. `step` will undo if needed.
         self.pc = self.pc.wrapping_add(1);
         byte
     }
 
     /// Fetches the next word (16 bits, little-endian) from memory at the PC
-    /// and increments the PC by 2. Uses the MemoryBus.
-    fn fetch_word(&mut self) -> u16 {
-        let low = self.fetch_byte() as u16;
-        let high = self.fetch_byte() as u16;
+    /// and increments the PC by 2.
+    fn fetch_word(&mut self, memory_bus: &mut MemoryBus) -> u16 {
+        let low = self.fetch_byte(memory_bus) as u16;
+        let high = self.fetch_byte(memory_bus) as u16;
         (high << 8) | low
     }
 
-    /// Pushes a 16-bit value onto the stack. Uses the MemoryBus.
-    fn push_word(&mut self, value: u16) {
+    /// Pushes a 16-bit value onto the stack.
+    fn push_word(&mut self, value: u16, memory_bus: &mut MemoryBus) {
         self.sp = self.sp.wrapping_sub(1);
-        self.memory_bus.write_byte(self.sp, (value >> 8) as u8); // High byte
+        memory_bus.write_byte(self.sp, (value >> 8) as u8); // High byte
         self.sp = self.sp.wrapping_sub(1);
-        self.memory_bus.write_byte(self.sp, (value & 0xFF) as u8); // Low byte
+        memory_bus.write_byte(self.sp, (value & 0xFF) as u8); // Low byte
     }
 
-    /// Pops a 16-bit value from the stack. Uses the MemoryBus.
-    fn pop_word(&mut self) -> u16 {
-        let low = self.memory_bus.read_byte(self.sp) as u16;
+    /// Pops a 16-bit value from the stack.
+    fn pop_word(&mut self, memory_bus: &mut MemoryBus) -> u16 {
+        let low = memory_bus.read_byte(self.sp) as u16;
         self.sp = self.sp.wrapping_add(1);
-        let high = self.memory_bus.read_byte(self.sp) as u16;
+        let high = memory_bus.read_byte(self.sp) as u16;
         self.sp = self.sp.wrapping_add(1);
         (high << 8) | low
     }
 
+    // --- Conditional Jump/Call/Return Helpers ---
 
-    fn jp_cc(&mut self, condition: bool) -> u8 {
-        let jump_addr = self.fetch_word(); // Always fetches the address
+    fn jp_cc(&mut self, condition: bool, memory_bus: &mut MemoryBus) -> u8 {
+        let jump_addr = self.fetch_word(memory_bus); // Always fetches the address
         if condition {
             self.pc = jump_addr;
             16 // 4 M-cycles (fetch + execute jump)
@@ -284,128 +269,99 @@ impl<'a> Cpu<'a> {
             12 // 3 M-cycles (fetch only)
         }
     }
+
+    // DAA does not access memory
     fn daa(&mut self) {
         let mut adjustment = 0u8;
         let mut set_carry = false;
+        let n_flag = self.get_flag(FLAG_N);
+        let h_flag = self.get_flag(FLAG_H);
+        let c_flag = self.get_flag(FLAG_C);
 
-        // Conditions for adjustment (based on PanDocs/Z80 behavior)
-        let n_flag = self.get_flag(FLAG_N); // Subtract flag (true if last op was subtraction)
-        let h_flag = self.get_flag(FLAG_H); // Half Carry flag
-        let c_flag = self.get_flag(FLAG_C); // Carry flag
-
-        if !n_flag { // After addition
-            // If lower nibble > 9 or Half Carry was set, add 0x06
-            if h_flag || (self.a & 0x0F) > 9 {
-                adjustment |= 0x06;
-            }
-            // If upper nibble > 9 or Carry was set, add 0x60
-            if c_flag || self.a > 0x99 {
-                adjustment |= 0x60;
-                set_carry = true; // Set Carry flag if adjustment needed for upper nibble
-            }
+        if !n_flag { // Addition
+            if h_flag || (self.a & 0x0F) > 9 { adjustment |= 0x06; }
+            if c_flag || self.a > 0x99 { adjustment |= 0x60; set_carry = true; }
             self.a = self.a.wrapping_add(adjustment);
-        } else { // After subtraction
-            // If Half Carry was set, subtract 0x06 (or add 0xFA effectively)
-            if h_flag {
-                 adjustment |= 0x06;
-                 // No upper nibble adjustment based on H flag during subtraction? Check manuals.
-                 // Seems like Z80 doesn't add 0x60 here. GB Z80 might differ slightly but likely follows.
-            }
-             // If Carry was set, subtract 0x60 (or add 0xA0 effectively)
-             if c_flag {
-                 adjustment |= 0x60;
-                 set_carry = true; // Carry remains set if it was set before
-             }
-             self.a = self.a.wrapping_sub(adjustment);
+        } else { // Subtraction
+            if h_flag { adjustment |= 0x06; }
+            if c_flag { adjustment |= 0x60; set_carry = true; }
+            self.a = self.a.wrapping_sub(adjustment);
         }
 
-        // Set flags:
         self.set_flag(FLAG_Z, self.a == 0);
-        // N flag is not affected by DAA
-        self.set_flag(FLAG_H, false); // H flag is always reset by DAA
-        self.set_flag(FLAG_C, set_carry || c_flag); // Set C if adjustment caused carry OR if it was already set (for subtraction)
+        self.set_flag(FLAG_H, false);
+        self.set_flag(FLAG_C, set_carry || c_flag); // Preserve original carry if subtract caused borrow adjustment
     }
-    fn ret_cc(&mut self, condition: bool) -> u8 {
+
+    fn ret_cc(&mut self, condition: bool, memory_bus: &mut MemoryBus) -> u8 {
         if condition {
-            // Return taken: Pop PC + execution time
-            self.pc = self.pop_word();
-            20 // 5 M-cycles (read condition + pop + jump)
+            self.pc = self.pop_word(memory_bus);
+            20 // 5 M-cycles
         } else {
-            // Return not taken: Only read condition
             8 // 2 M-cycles
         }
     }
-    fn call_cc(&mut self, condition: bool) -> u8 {
-        let jump_addr = self.fetch_word(); // Always fetches the address (PC now points after nn)
+
+    fn call_cc(&mut self, condition: bool, memory_bus: &mut MemoryBus) -> u8 {
+        let jump_addr = self.fetch_word(memory_bus);
         if condition {
-            // Call taken: Push PC + jump
-            self.push_word(self.pc); // Push the address *after* the CALL instruction
+            self.push_word(self.pc, memory_bus);
             self.pc = jump_addr;
-            24 // 6 M-cycles (read condition + fetch addr + push + jump)
+            24 // 6 M-cycles
         } else {
-            // Call not taken: Only read condition + fetch address
             12 // 3 M-cycles
         }
     }
-    fn rst(&mut self, vector_offset: u16) -> u8 {
-        self.push_word(self.pc); // Push address *after* RST instruction
+
+    fn rst(&mut self, vector_offset: u16, memory_bus: &mut MemoryBus) -> u8 {
+        self.push_word(self.pc, memory_bus);
         self.pc = vector_offset;
         16 // 4 M-cycles
     }
-    fn add_sp_i8(&mut self) {
-        let offset = self.fetch_byte() as i8; // Signed offset
-        let value = offset as i16 as u16; // Convert to u16 correctly handling sign extension
-        let sp = self.sp;
 
-        // Calculate result
+    // Fetches immediate byte
+    fn add_sp_i8(&mut self, memory_bus: &mut MemoryBus) {
+        let offset = self.fetch_byte(memory_bus) as i8;
+        let value = offset as i16 as u16;
+        let sp = self.sp;
         let result = sp.wrapping_add(value);
 
-        // Calculate flags based on lower byte addition (like ADD HL, rr)
-        // Carry: Check carry out of bit 7 when adding lower bytes
         let carry = (sp & 0x00FF) + (value & 0x00FF) > 0x00FF;
-        // Half Carry: Check carry out of bit 3 when adding lower bytes
         let half_carry = (sp & 0x000F) + (value & 0x000F) > 0x000F;
 
         self.sp = result;
-
-        // Set flags for ADD SP, i8
-        self.set_flag(FLAG_Z | FLAG_N, false); // Z and N are always reset
+        self.set_flag(FLAG_Z | FLAG_N, false);
         self.set_flag(FLAG_H, half_carry);
         self.set_flag(FLAG_C, carry);
     }
-    fn ld_hl_sp_i8(&mut self) {
-        let offset = self.fetch_byte() as i8; // Signed offset
-        let value = offset as i16 as u16; // Convert to u16 correctly handling sign extension
-        let sp = self.sp;
 
-        // Calculate result
+     // Fetches immediate byte
+     fn ld_hl_sp_i8(&mut self, memory_bus: &mut MemoryBus) {
+        let offset = self.fetch_byte(memory_bus) as i8;
+        let value = offset as i16 as u16;
+        let sp = self.sp;
         let result = sp.wrapping_add(value);
 
-        // Calculate flags based on lower byte addition (same as ADD SP, i8)
         let carry = (sp & 0x00FF) + (value & 0x00FF) > 0x00FF;
         let half_carry = (sp & 0x000F) + (value & 0x000F) > 0x000F;
 
         self.set_hl(result);
-
-        // Set flags for LD HL, SP+i8
-        self.set_flag(FLAG_Z | FLAG_N, false); // Z and N are always reset
+        self.set_flag(FLAG_Z | FLAG_N, false);
         self.set_flag(FLAG_H, half_carry);
         self.set_flag(FLAG_C, carry);
     }
 
     /// Decodes and executes a fetched opcode.
     /// Returns the number of T-cycles the instruction took.
-    /// Instructions that read/write memory implicitly use `self.memory_bus`.
-    fn execute(&mut self, opcode: u8) -> u8 {
-        // --- Simple example instructions (already compatible) ---
+    fn execute(&mut self, opcode: u8, memory_bus: &mut MemoryBus) -> u8 {
         match opcode {
             // NOP
             0x00 => 4,
 
             // LD BC, d16
-            0x01 => { let value = self.fetch_word(); self.set_bc(value); 12 }
+            0x01 => { let value = self.fetch_word(memory_bus); self.set_bc(value); 12 }
             // LD (BC), A
-            0x02 => { self.memory_bus.write_byte(self.get_bc(), self.a); 8 },
+            0x02 => { memory_bus.write_byte(self.get_bc(), self.a); 8 },
             // INC BC
             0x03 => { self.set_bc(self.get_bc().wrapping_add(1)); 8 },
             // INC B
@@ -413,21 +369,22 @@ impl<'a> Cpu<'a> {
             // DEC B
             0x05 => { self.b = self.dec_u8(self.b); 4 },
              // LD B, d8
-             0x06 => { self.b = self.fetch_byte(); 8 },
-            // RLCA (Rotate Left A through Carry)
-            0x07 => { self.a = self.rlc(self.a); self.set_flag(FLAG_Z, false); 4 }, // RLCA clears Z flag
+             0x06 => { self.b = self.fetch_byte(memory_bus); 8 },
+            // RLCA
+            0x07 => { self.a = self.rlc(self.a); self.set_flag(FLAG_Z, false); 4 },
 
             // LD (a16), SP
             0x08 => {
-                 let addr = self.fetch_word();
-                 self.memory_bus.write_byte(addr, (self.sp & 0xFF) as u8);
-                 self.memory_bus.write_byte(addr.wrapping_add(1), (self.sp >> 8) as u8);
+                 let addr = self.fetch_word(memory_bus);
+                 // Write low byte first, then high byte for SP store
+                 memory_bus.write_byte(addr, (self.sp & 0xFF) as u8);
+                 memory_bus.write_byte(addr.wrapping_add(1), (self.sp >> 8) as u8);
                  20
              },
             // ADD HL, BC
             0x09 => { let val = self.get_bc(); self.add_hl(val); 8 },
              // LD A, (BC)
-             0x0A => { self.a = self.memory_bus.read_byte(self.get_bc()); 8 },
+             0x0A => { self.a = memory_bus.read_byte(self.get_bc()); 8 },
              // DEC BC
              0x0B => { self.set_bc(self.get_bc().wrapping_sub(1)); 8 },
              // INC C
@@ -435,27 +392,25 @@ impl<'a> Cpu<'a> {
              // DEC C
              0x0D => { self.c = self.dec_u8(self.c); 4 },
              // LD C, d8
-             0x0E => { self.c = self.fetch_byte(); 8 },
-            // RRCA (Rotate Right A through Carry)
-            0x0F => { self.a = self.rrc(self.a); self.set_flag(FLAG_Z, false); 4 }, // RRCA clears Z flag
+             0x0E => { self.c = self.fetch_byte(memory_bus); 8 },
+            // RRCA
+            0x0F => { self.a = self.rrc(self.a); self.set_flag(FLAG_Z, false); 4 },
 
 
-            // STOP (Needs special handling in main loop for potential 0x00 byte following)
+            // STOP
             0x10 => {
-                 // Fetch the potential 0x00 byte if present
-                 // let next_byte = self.memory_bus.read_byte(self.pc);
-                 // if next_byte == 0x00 { self.pc = self.pc.wrapping_add(1); } // Consume 0x00
+                 // STOP consumes the next byte (usually 0x00) but does nothing with it
+                 // fetch_byte handles the PC increment
+                 let _ = self.fetch_byte(memory_bus); // Consume the 0x00
                  // TODO: Handle CGB speed switching if applicable.
                  self.stop_requested = true;
-                 4
+                 // Actual low power mode isn't simulated, just stops fetching.
+                 4 // STOP instruction itself takes 4 cycles
              },
             // LD DE, d16
-            0x11 => { 
-                let word = self.fetch_word();
-                self.set_de(word); 
-            12 },
+            0x11 => { let value = self.fetch_word(memory_bus); self.set_de(value); 12 },
              // LD (DE), A
-             0x12 => { self.memory_bus.write_byte(self.get_de(), self.a); 8 },
+             0x12 => { memory_bus.write_byte(self.get_de(), self.a); 8 },
              // INC DE
              0x13 => { self.set_de(self.get_de().wrapping_add(1)); 8 },
             // INC D
@@ -463,16 +418,16 @@ impl<'a> Cpu<'a> {
             // DEC D
             0x15 => { self.d = self.dec_u8(self.d); 4 },
              // LD D, d8
-             0x16 => { self.d = self.fetch_byte(); 8 },
-            // RLA (Rotate Left A)
-            0x17 => { self.a = self.rl(self.a); self.set_flag(FLAG_Z, false); 4 }, // RLA clears Z flag
+             0x16 => { self.d = self.fetch_byte(memory_bus); 8 },
+            // RLA
+            0x17 => { self.a = self.rl(self.a); self.set_flag(FLAG_Z, false); 4 },
 
-            // JR r8 (Unconditional Relative Jump)
-            0x18 => self.jr_cc(true), // Condition always true for JR
+            // JR r8
+            0x18 => self.jr_cc(true, memory_bus),
             // ADD HL, DE
             0x19 => { let val = self.get_de(); self.add_hl(val); 8 },
              // LD A, (DE)
-             0x1A => { self.a = self.memory_bus.read_byte(self.get_de()); 8 },
+             0x1A => { self.a = memory_bus.read_byte(self.get_de()); 8 },
              // DEC DE
              0x1B => { self.set_de(self.get_de().wrapping_sub(1)); 8 },
             // INC E
@@ -480,21 +435,19 @@ impl<'a> Cpu<'a> {
             // DEC E
             0x1D => { self.e = self.dec_u8(self.e); 4 },
             // LD E, d8
-            0x1E => { self.e = self.fetch_byte(); 8 },
-            // RRA (Rotate Right A)
-            0x1F => { self.a = self.rr(self.a); self.set_flag(FLAG_Z, false); 4 }, // RRA clears Z flag
+            0x1E => { self.e = self.fetch_byte(memory_bus); 8 },
+            // RRA
+            0x1F => { self.a = self.rr(self.a); self.set_flag(FLAG_Z, false); 4 },
 
 
             // JR NZ, r8
-            0x20 => self.jr_cc(!self.get_flag(FLAG_Z)),
+            0x20 => self.jr_cc(!self.get_flag(FLAG_Z), memory_bus),
             // LD HL, d16
-            0x21 => { let val = self.fetch_word();
-                self.set_hl(val);
-                 12 },
+            0x21 => { let val = self.fetch_word(memory_bus); self.set_hl(val); 12 },
             // LD (HL+), A
             0x22 => {
                  let addr = self.get_hl();
-                 self.memory_bus.write_byte(addr, self.a);
+                 memory_bus.write_byte(addr, self.a);
                  self.set_hl(addr.wrapping_add(1));
                  8
             },
@@ -505,18 +458,18 @@ impl<'a> Cpu<'a> {
              // DEC H
              0x25 => { self.h = self.dec_u8(self.h); 4 },
              // LD H, d8
-             0x26 => { self.h = self.fetch_byte(); 8 },
-            // DAA (Decimal Adjust Accumulator)
+             0x26 => { self.h = self.fetch_byte(memory_bus); 8 },
+            // DAA
             0x27 => { self.daa(); 4 },
 
             // JR Z, r8
-            0x28 => self.jr_cc(self.get_flag(FLAG_Z)),
+            0x28 => self.jr_cc(self.get_flag(FLAG_Z), memory_bus),
             // ADD HL, HL
             0x29 => { let val = self.get_hl(); self.add_hl(val); 8 },
             // LD A, (HL+)
             0x2A => {
                  let addr = self.get_hl();
-                 self.a = self.memory_bus.read_byte(addr);
+                 self.a = memory_bus.read_byte(addr);
                  self.set_hl(addr.wrapping_add(1));
                  8
              },
@@ -527,22 +480,22 @@ impl<'a> Cpu<'a> {
              // DEC L
              0x2D => { self.l = self.dec_u8(self.l); 4 },
              // LD L, d8
-             0x2E => { self.l = self.fetch_byte(); 8 },
-            // CPL (Complement A)
+             0x2E => { self.l = self.fetch_byte(memory_bus); 8 },
+            // CPL
             0x2F => {
                 self.a = !self.a;
-                self.set_flag(FLAG_N | FLAG_H, true); // Set N and H flags
+                self.set_flag(FLAG_N | FLAG_H, true);
                 4
             },
 
             // JR NC, r8
-            0x30 => self.jr_cc(!self.get_flag(FLAG_C)),
+            0x30 => self.jr_cc(!self.get_flag(FLAG_C), memory_bus),
             // LD SP, d16
-            0x31 => { self.sp = self.fetch_word(); 12 },
+            0x31 => { self.sp = self.fetch_word(memory_bus); 12 },
              // LD (HL-), A
              0x32 => {
                  let addr = self.get_hl();
-                 self.memory_bus.write_byte(addr, self.a);
+                 memory_bus.write_byte(addr, self.a);
                  self.set_hl(addr.wrapping_sub(1));
                  8
             },
@@ -551,40 +504,40 @@ impl<'a> Cpu<'a> {
             // INC (HL)
             0x34 => {
                 let addr = self.get_hl();
-                let value = self.memory_bus.read_byte(addr);
+                let value = memory_bus.read_byte(addr);
                 let result = self.inc_u8(value);
-                self.memory_bus.write_byte(addr, result);
+                memory_bus.write_byte(addr, result);
                 12
             },
             // DEC (HL)
             0x35 => {
                 let addr = self.get_hl();
-                let value = self.memory_bus.read_byte(addr);
+                let value = memory_bus.read_byte(addr);
                 let result = self.dec_u8(value);
-                self.memory_bus.write_byte(addr, result);
+                memory_bus.write_byte(addr, result);
                 12
             },
             // LD (HL), d8
             0x36 => {
-                let value = self.fetch_byte();
-                self.memory_bus.write_byte(self.get_hl(), value);
+                let value = self.fetch_byte(memory_bus);
+                memory_bus.write_byte(self.get_hl(), value);
                 12
             },
-            // SCF (Set Carry Flag)
+            // SCF
             0x37 => {
-                self.set_flag(FLAG_N | FLAG_H, false); // Clear N and H
-                self.set_flag(FLAG_C, true);           // Set C
+                self.set_flag(FLAG_N | FLAG_H, false);
+                self.set_flag(FLAG_C, true);
                 4
             },
 
             // JR C, r8
-            0x38 => self.jr_cc(self.get_flag(FLAG_C)),
+            0x38 => self.jr_cc(self.get_flag(FLAG_C), memory_bus),
             // ADD HL, SP
             0x39 => { let val = self.sp; self.add_hl(val); 8 },
             // LD A, (HL-)
             0x3A => {
                  let addr = self.get_hl();
-                 self.a = self.memory_bus.read_byte(addr);
+                 self.a = memory_bus.read_byte(addr);
                  self.set_hl(addr.wrapping_sub(1));
                  8
              },
@@ -595,306 +548,258 @@ impl<'a> Cpu<'a> {
              // DEC A
              0x3D => { self.a = self.dec_u8(self.a); 4 },
             // LD A, d8
-            0x3E => { self.a = self.fetch_byte(); 8 },
-            // CCF (Complement Carry Flag)
+            0x3E => { self.a = self.fetch_byte(memory_bus); 8 },
+            // CCF
             0x3F => {
                 let current_c = self.get_flag(FLAG_C);
-                self.set_flag(FLAG_N | FLAG_H, false); // Clear N and H
-                self.set_flag(FLAG_C, !current_c);     // Flip C
+                self.set_flag(FLAG_N | FLAG_H, false);
+                self.set_flag(FLAG_C, !current_c);
                 4
             },
 
-             // LD B, B to LD L, L (effectively NOPs)
-             // LD r8, r8'
+             // LD r8, r8' (Includes LD B,B etc. which are 4 cycles)
+             // Also includes LD r, (HL) (8 cycles) and LD (HL), r (8 cycles)
+             // HALT (0x76) is handled separately below.
              0x40..=0x7F => {
-                 // Exclude HALT (0x76) which is handled below
-                 if opcode == 0x76 { self.halt(); 4 } else { self.ld_r8_r8(opcode) }
-                 // This range includes 0x78 (LD A, B)
+                 if opcode == 0x76 {
+                     self.halt(memory_bus) // Pass memory_bus for HALT bug check
+                 } else {
+                     self.ld_r8_r8(opcode, memory_bus)
+                 }
+                 // Cycles are returned by ld_r8_r8 or halt
              },
-             // LD (HL), r8 where r8 = B,C,D,E,H,L,A
-             0x70..=0x75 | 0x77 => {
-                 let val = match opcode {
-                    0x70 => self.b, 0x71 => self.c, 0x72 => self.d,
-                    0x73 => self.e, 0x74 => self.h, 0x75 => self.l,
-                    0x77 => self.a,
-                    _ => unreachable!(), // Should not happen
-                 };
-                 self.memory_bus.write_byte(self.get_hl(), val);
-                 8
-             },
-             // HALT
-             0x76 => { self.halt(); 4 },
 
-            // LD r8, (HL) where r8 = B,C,D,E,H,L,A
-            0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E => {
-                let val = self.memory_bus.read_byte(self.get_hl());
-                 match opcode {
-                     0x46 => self.b = val, 0x4E => self.c = val,
-                     0x56 => self.d = val, 0x5E => self.e = val,
-                     0x66 => self.h = val, 0x6E => self.l = val,
-                     0x7E => self.a = val,
-                     _ => unreachable!(),
-                 };
-                8
+             // HALT (Moved check into 0x40..=0x7F range handler)
+             // 0x76 => self.halt(memory_bus), <-- Handled above
+
+             // --- The LD r, (HL) and LD (HL), r cases are handled within ld_r8_r8 ---
+             // 0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E => { ... handled by ld_r8_r8 ... }
+             // 0x70..=0x75 | 0x77 => { ... handled by ld_r8_r8 ... }
+
+
+            // --- ALU Operations: ADD/ADC/SUB/SBC/AND/XOR/OR/CP A, r8|(HL) ---
+            0x80..=0xBF => {
+                // Determine operand source and if it's (HL)
+                let operand_code = opcode & 0x07;
+                let is_hl_operand = operand_code == 0x06;
+                let operand = self.get_alu_operand(operand_code, memory_bus);
+
+                match (opcode >> 3) & 0x07 {
+                    0 => self.add_a(operand, false), // ADD A, operand
+                    1 => self.add_a(operand, true),  // ADC A, operand
+                    2 => self.sub_a(operand, false), // SUB A, operand
+                    3 => self.sub_a(operand, true),  // SBC A, operand
+                    4 => self.and_a(operand),        // AND A, operand
+                    5 => self.xor_a(operand),        // XOR A, operand
+                    6 => self.or_a(operand),         // OR A, operand
+                    7 => self.cp_a(operand),         // CP A, operand
+                    _ => unreachable!(),
+                }
+                if is_hl_operand { 8 } else { 4 } // Base cycles
             },
 
-            // --- ADD A, r8 / ADC A, r8 / SUB A, r8 / SBC A, r8 ---
-             // Includes (HL) operand which takes 8 cycles
-            0x80..=0x9F => {
-                let cycles = if (opcode & 0x07) == 0x06 { 8 } else { 4 };
-                self.alu_op(opcode);
-                cycles
-            },
-
-            // --- AND A, r8 / XOR A, r8 / OR A, r8 / CP A, r8 ---
-            // Includes (HL) operand which takes 8 cycles
-            // This range includes 0xB1 (OR C) and 0xAF (XOR A)
-            0xA0..=0xBF => {
-                let cycles = if (opcode & 0x07) == 0x06 { 8 } else { 4 };
-                self.alu_op(opcode);
-                cycles
-            },
 
             // --- Conditional Returns ---
-            // RET NZ
-            0xC0 => self.ret_cc(!self.get_flag(FLAG_Z)),
-            // POP BC
-            0xC1 => { let val = self.pop_word(); self.set_bc(val); 12 },
-            // JP NZ, nn
-            0xC2 => self.jp_cc(!self.get_flag(FLAG_Z)),
-            // JP nn
-            0xC3 => { self.pc = self.fetch_word(); 16 },
-            // CALL NZ, nn
-            0xC4 => self.call_cc(!self.get_flag(FLAG_Z)),
-            // PUSH BC
-            0xC5 => { self.push_word(self.get_bc()); 16 },
-            // ADD A, n8
-            0xC6 => { let v = self.fetch_byte(); self.add_a(v, false); 8 },
-            // RST 00H
-            0xC7 => { self.rst(0x00); 16 },
+            0xC0 => self.ret_cc(!self.get_flag(FLAG_Z), memory_bus), // RET NZ
+            0xC1 => { let val = self.pop_word(memory_bus); self.set_bc(val); 12 }, // POP BC
+            0xC2 => self.jp_cc(!self.get_flag(FLAG_Z), memory_bus), // JP NZ, nn
+            0xC3 => { self.pc = self.fetch_word(memory_bus); 16 }, // JP nn
+            0xC4 => self.call_cc(!self.get_flag(FLAG_Z), memory_bus), // CALL NZ, nn
+            0xC5 => { self.push_word(self.get_bc(), memory_bus); 16 }, // PUSH BC
+            0xC6 => { let v = self.fetch_byte(memory_bus); self.add_a(v, false); 8 }, // ADD A, n8
+            0xC7 => self.rst(0x00, memory_bus), // RST 00H
 
-            // RET Z
-            0xC8 => self.ret_cc(self.get_flag(FLAG_Z)),
-            // RET (Unconditional Return)
-            0xC9 => { self.pc = self.pop_word(); 16 },
-            // JP Z, nn
-            0xCA => self.jp_cc(self.get_flag(FLAG_Z)),
+            0xC8 => self.ret_cc(self.get_flag(FLAG_Z), memory_bus), // RET Z
+            0xC9 => { self.pc = self.pop_word(memory_bus); 16 }, // RET
+            0xCA => self.jp_cc(self.get_flag(FLAG_Z), memory_bus), // JP Z, nn
             // CB Prefix
-            0xCB => { let val = self.fetch_byte();
-                 self.execute_cb(val)},
-            // CALL Z, nn
-            0xCC => self.call_cc(self.get_flag(FLAG_Z)),
-            // CALL nn
-            0xCD => {
-                let addr = self.fetch_word();
-                self.push_word(self.pc); // Push address *after* CALL instruction
-                self.pc = addr;
-                24 // 6 M-cycles
+            0xCB => {
+                let cb_opcode = self.fetch_byte(memory_bus);
+                self.execute_cb(cb_opcode, memory_bus) // execute_cb returns cycles
             },
-            // ADC A, n8
-            0xCE => { let v = self.fetch_byte(); self.add_a(v, true); 8 },
-            // RST 08H
-            0xCF => { self.rst(0x08); 16 },
+            0xCC => self.call_cc(self.get_flag(FLAG_Z), memory_bus), // CALL Z, nn
+            0xCD => { // CALL nn
+                let addr = self.fetch_word(memory_bus);
+                self.push_word(self.pc, memory_bus);
+                self.pc = addr;
+                24
+            },
+            0xCE => { let v = self.fetch_byte(memory_bus); self.add_a(v, true); 8 }, // ADC A, n8
+            0xCF => self.rst(0x08, memory_bus), // RST 08H
 
 
-            // RET NC
-            0xD0 => self.ret_cc(!self.get_flag(FLAG_C)),
-            // POP DE
-            0xD1 => { let val = self.pop_word(); self.set_de(val); 12 },
-            // JP NC, nn
-            0xD2 => self.jp_cc(!self.get_flag(FLAG_C)),
-            // Opcode 0xD3 is invalid/unused
-            0xD3 => { panic!("Invalid opcode: 0xD3 at {:04X}", self.pc.wrapping_sub(1)); }
-            // CALL NC, nn
-            0xD4 => self.call_cc(!self.get_flag(FLAG_C)),
-            // PUSH DE
-            0xD5 => { self.push_word(self.get_de()); 16 },
-            // SUB A, n8
-            0xD6 => { let v = self.fetch_byte(); self.sub_a(v, false); 8 },
-            // RST 10H
-            0xD7 => { self.rst(0x10); 16 },
+            0xD0 => self.ret_cc(!self.get_flag(FLAG_C), memory_bus), // RET NC
+            0xD1 => { let val = self.pop_word(memory_bus); self.set_de(val); 12 }, // POP DE
+            0xD2 => self.jp_cc(!self.get_flag(FLAG_C), memory_bus), // JP NC, nn
+            0xD3 => { panic!("Invalid opcode: 0xD3 at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
+            0xD4 => self.call_cc(!self.get_flag(FLAG_C), memory_bus), // CALL NC, nn
+            0xD5 => { self.push_word(self.get_de(), memory_bus); 16 }, // PUSH DE
+            0xD6 => { let v = self.fetch_byte(memory_bus); self.sub_a(v, false); 8 }, // SUB A, n8
+            0xD7 => self.rst(0x10, memory_bus), // RST 10H
 
-            // RET C
-            0xD8 => self.ret_cc(self.get_flag(FLAG_C)),
-            // RETI (Return from Interrupt)
-            0xD9 => {
-                self.pc = self.pop_word();
-                self.ime = true; // Enable interrupts after RETI
+            0xD8 => self.ret_cc(self.get_flag(FLAG_C), memory_bus), // RET C
+            0xD9 => { // RETI
+                self.pc = self.pop_word(memory_bus);
+                self.ime = true; // Enable interrupts AFTER executing RETI
+                // Note: This differs from EI which enables after the *next* instruction.
+                self.ime_scheduled = false; // Ensure no pending EI schedule interferes
                 16
             },
-            // JP C, nn
-            0xDA => self.jp_cc(self.get_flag(FLAG_C)),
-             // Opcode 0xDB is invalid/unused
-             0xDB => { panic!("Invalid opcode: 0xDB at {:04X}", self.pc.wrapping_sub(1)); }
-            // CALL C, nn
-            0xDC => self.call_cc(self.get_flag(FLAG_C)),
-            // Opcode 0xDD is invalid/unused
-             0xDD => { panic!("Invalid opcode: 0xDD at {:04X}", self.pc.wrapping_sub(1)); }
-            // SBC A, n8
-            0xDE => { let v = self.fetch_byte(); self.sub_a(v, true); 8 },
-            // RST 18H
-            0xDF => { self.rst(0x18); 16 },
+            0xDA => self.jp_cc(self.get_flag(FLAG_C), memory_bus), // JP C, nn
+            0xDB => { panic!("Invalid opcode: 0xDB at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
+            0xDC => self.call_cc(self.get_flag(FLAG_C), memory_bus), // CALL C, nn
+            0xDD => { panic!("Invalid opcode: 0xDD at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
+            0xDE => { let v = self.fetch_byte(memory_bus); self.sub_a(v, true); 8 }, // SBC A, n8
+            0xDF => self.rst(0x18, memory_bus), // RST 18H
 
 
             // LDH (a8), A --- Write A to 0xFF00 + n8
             0xE0 => {
-                let offset = self.fetch_byte() as u16;
-                self.memory_bus.write_byte(0xFF00 + offset, self.a);
+                let offset = self.fetch_byte(memory_bus) as u16;
+                memory_bus.write_byte(0xFF00 + offset, self.a);
                 12
             },
             // POP HL
-            0xE1 => { let val = self.pop_word(); self.set_hl(val); 12 },
+            0xE1 => { let val = self.pop_word(memory_bus); self.set_hl(val); 12 },
              // LD (C), A --- Write A to 0xFF00 + C
              0xE2 => {
-                self.memory_bus.write_byte(0xFF00 + self.c as u16, self.a);
+                memory_bus.write_byte(0xFF00 + self.c as u16, self.a);
                 8
             },
-            // Opcodes 0xE3, 0xE4 are invalid/unused
-            0xE3 | 0xE4 => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); }
+            0xE3 | 0xE4 => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); } // Invalid
             // PUSH HL
-            0xE5 => { self.push_word(self.get_hl()); 16 },
+            0xE5 => { self.push_word(self.get_hl(), memory_bus); 16 },
             // AND A, n8
-            0xE6 => { let v = self.fetch_byte(); self.and_a(v); 8 },
+            0xE6 => { let v = self.fetch_byte(memory_bus); self.and_a(v); 8 },
             // RST 20H
-            0xE7 => { self.rst(0x20); 16 },
+            0xE7 => self.rst(0x20, memory_bus),
 
-            // ADD SP, r8 (signed immediate)
-            0xE8 => { self.add_sp_i8(); 16 },
-            // JP HL (Jump to address in HL)
+            // ADD SP, r8
+            0xE8 => { self.add_sp_i8(memory_bus); 16 },
+            // JP HL
             0xE9 => { self.pc = self.get_hl(); 4 },
             // LD (a16), A
             0xEA => {
-                let addr = self.fetch_word();
-                self.memory_bus.write_byte(addr, self.a);
+                let addr = self.fetch_word(memory_bus);
+                memory_bus.write_byte(addr, self.a);
                 16
             },
-            // Opcodes 0xEB, 0xEC, 0xED are invalid/unused
-            0xEB | 0xEC | 0xED => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); }
+            0xEB | 0xEC | 0xED => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); } // Invalid
             // XOR A, n8
-            0xEE => { let v = self.fetch_byte(); self.xor_a(v); 8 },
+            0xEE => { let v = self.fetch_byte(memory_bus); self.xor_a(v); 8 },
             // RST 28H
-            0xEF => { self.rst(0x28); 16 },
+            0xEF => self.rst(0x28, memory_bus),
 
 
             // LDH A, (a8) --- Read from 0xFF00 + n8 into A
             0xF0 => {
-                let offset = self.fetch_byte() as u16;
-                self.a = self.memory_bus.read_byte(0xFF00 + offset);
+                let offset = self.fetch_byte(memory_bus) as u16;
+                self.a = memory_bus.read_byte(0xFF00 + offset);
                 12
             },
             // POP AF
-            0xF1 => { let val = self.pop_word(); self.set_af(val); 12 },
+            0xF1 => { let val = self.pop_word(memory_bus); self.set_af(val); 12 },
             // LD A, (C) --- Read from 0xFF00 + C into A
             0xF2 => {
-                 self.a = self.memory_bus.read_byte(0xFF00 + self.c as u16);
+                 self.a = memory_bus.read_byte(0xFF00 + self.c as u16);
                  8
              },
-            // DI --- Disable Interrupts
+            // DI
             0xF3 => {
                 self.ime = false;
                 self.ime_scheduled = false; // Cancel pending EI
                 4
             },
-             // Opcode 0xF4 is invalid/unused
-             0xF4 => { panic!("Invalid opcode: 0xF4 at {:04X}", self.pc.wrapping_sub(1)); }
+            0xF4 => { panic!("Invalid opcode: 0xF4 at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
             // PUSH AF
-            0xF5 => { self.push_word(self.get_af()); 16 },
+            0xF5 => { self.push_word(self.get_af(), memory_bus); 16 },
             // OR A, n8
-            0xF6 => { let v = self.fetch_byte(); self.or_a(v); 8 },
+            0xF6 => { let v = self.fetch_byte(memory_bus); self.or_a(v); 8 },
             // RST 30H
-            0xF7 => { self.rst(0x30); 16 },
+            0xF7 => self.rst(0x30, memory_bus),
 
-            // LD HL, SP+r8 (signed immediate)
-            0xF8 => { self.ld_hl_sp_i8(); 12 },
+            // LD HL, SP+r8
+            0xF8 => { self.ld_hl_sp_i8(memory_bus); 12 },
             // LD SP, HL
             0xF9 => { self.sp = self.get_hl(); 8 },
             // LD A, (a16)
             0xFA => {
-                 let addr = self.fetch_word();
-                 self.a = self.memory_bus.read_byte(addr);
+                 let addr = self.fetch_word(memory_bus);
+                 self.a = memory_bus.read_byte(addr);
                  16
             },
-            // EI --- Enable Interrupts (delayed)
+            // EI
             0xFB => {
                 // IME is enabled *after* the instruction following EI
                 self.ime_scheduled = true;
                 4
             },
-            // Opcodes 0xFC, 0xFD are invalid/unused
-            0xFC | 0xFD => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); }
+            0xFC | 0xFD => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); } // Invalid
             // CP A, n8
             0xFE => {
-                 let value = self.fetch_byte();
+                 let value = self.fetch_byte(memory_bus);
                  self.cp_a(value);
                  8
             },
             // RST 38H
-            0xFF => { self.rst(0x38); 16 },
+            0xFF => self.rst(0x38, memory_bus),
 
-            // This catch-all should ideally not be reached if all 256 opcodes are handled
-             _ => {
-                let current_pc = self.pc.wrapping_sub(1); // PC was already incremented by fetch
-                panic!(
-                    "Reached end of match - Unhandled opcode: 0x{:02X} at address 0x{:04X}\nCPU State: AF={:04X} BC={:04X} DE={:04X} HL={:04X} SP={:04X} IME={}",
-                    opcode, current_pc, self.get_af(), self.get_bc(), self.get_de(), self.get_hl(), self.sp, self.ime
-                );
-             }
+            // _ => { ... } // Should be covered by ranges now
         }
     }
 
     /// Executes CB-prefixed opcodes.
-    /// Returns the number of T-cycles the instruction took.
-    /// Operations involving (HL) take more cycles.
-    fn execute_cb(&mut self, opcode: u8) -> u8 {
-         // Most CB ops are 8 cycles, (HL) ops are 16 (except BIT which is 12)
-         let mut cycles = 8;
+    fn execute_cb(&mut self, opcode: u8, memory_bus: &mut MemoryBus) -> u8 {
          let target_reg_code = opcode & 0x07; // 0-5: B,C,D,E,H,L, 6: (HL), 7: A
-         let operation_code = opcode >> 3; // Identifies the operation type (RLC, BIT, SET, etc.)
+         let operation_group = opcode >> 6; // 0: Rotate/Shift, 1: BIT, 2: RES, 3: SET
+         let operation_subcode = (opcode >> 3) & 0x07; // Specific rotate/shift type or bit index
 
+         let mut cycles = 8; // Base cycles for register ops
+         let is_hl_operand = target_reg_code == 6;
+
+         // Read the source value
          let value = match target_reg_code {
              0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
              4 => self.h, 5 => self.l,
              6 => {
-                 cycles = if operation_code >= 8 && operation_code < 16 { 12 } else { 16 }; // BIT (HL) is 12, others 16
-                 self.memory_bus.read_byte(self.get_hl())
+                 cycles = match operation_group {
+                     1 => 12, // BIT (HL)
+                     _ => 16, // RLC/RRC/RL/RR/SLA/SRA/SWAP/SRL/RES/SET (HL)
+                 };
+                 memory_bus.read_byte(self.get_hl())
              },
              7 => self.a,
-             _ => unreachable!(), // Should not happen with & 0x07
+             _ => unreachable!(),
          };
 
-         let bit_index = (opcode >> 3) & 0x07; // For BIT, RES, SET (0-7)
-
-         let result = match operation_code {
-             // --- Rotates/Shifts ---
-             0 => self.rlc(value), // RLC r8 / (HL)
-             1 => self.rrc(value), // RRC r8 / (HL)
-             2 => self.rl(value),  // RL r8 / (HL)
-             3 => self.rr(value),  // RR r8 / (HL)
-             4 => self.sla(value), // SLA r8 / (HL)
-             5 => self.sra(value), // SRA r8 / (HL)
-             6 => self.swap(value),// SWAP r8 / (HL)
-             7 => self.srl(value), // SRL r8 / (HL)
-
-             // --- BIT, RES, SET --- (bit_index matters here)
-             8..=15 => { // BIT b, r8 / (HL)
-                 self.op_bit(bit_index, value);
-                 value // BIT doesn't change the value, only flags
+         // Perform the operation
+         let result = match operation_group {
+             0 => { // Rotates/Shifts
+                 match operation_subcode {
+                     0 => self.rlc(value), 1 => self.rrc(value), 2 => self.rl(value), 3 => self.rr(value),
+                     4 => self.sla(value), 5 => self.sra(value), 6 => self.swap(value), 7 => self.srl(value),
+                     _ => unreachable!(),
+                 }
+             },
+             1 => { // BIT b, r/(HL)
+                 self.op_bit(operation_subcode, value);
+                 value // BIT doesn't modify the value, only flags
              }
-             16..=23 => { // RES b, r8 / (HL)
-                 value & !(1 << bit_index)
+             2 => { // RES b, r/(HL)
+                 value & !(1 << operation_subcode)
              }
-              24..=31 => { // SET b, r8 / (HL)
-                 value | (1 << bit_index)
+              3 => { // SET b, r/(HL)
+                 value | (1 << operation_subcode)
              }
             _ => unreachable!(),
          };
 
         // Write result back if it wasn't a BIT operation
-        if operation_code < 8 || operation_code >= 16 {
+        if operation_group != 1 { // If not BIT
              match target_reg_code {
                  0 => self.b = result, 1 => self.c = result, 2 => self.d = result, 3 => self.e = result,
                  4 => self.h = result, 5 => self.l = result,
-                 6 => self.memory_bus.write_byte(self.get_hl(), result),
+                 6 => memory_bus.write_byte(self.get_hl(), result),
                  7 => self.a = result,
                  _ => unreachable!(),
              };
@@ -903,10 +808,9 @@ impl<'a> Cpu<'a> {
         cycles
     }
 
-    // --- Register Getters/Setters (Combined) ---
-    // (Unchanged from your code - they are correct)
-    fn get_af(&self) -> u16 { ((self.a as u16) << 8) | (self.f as u16) }
-    fn set_af(&mut self, value: u16) { self.a = (value >> 8) as u8; self.f = (value & 0x00F0) as u8; } // Mask low bits
+    // --- Register Getters/Setters (Combined) --- No changes needed ---
+    fn get_af(&self) -> u16 { ((self.a as u16) << 8) | (self.f as u16 & 0xF0) } // Mask low bits of F on read
+    fn set_af(&mut self, value: u16) { self.a = (value >> 8) as u8; self.f = (value & 0x00F0) as u8; } // Mask low bits on write
     fn get_bc(&self) -> u16 { ((self.b as u16) << 8) | (self.c as u16) }
     fn set_bc(&mut self, value: u16) { self.b = (value >> 8) as u8; self.c = (value & 0x00FF) as u8; }
     fn get_de(&self) -> u16 { ((self.d as u16) << 8) | (self.e as u16) }
@@ -914,71 +818,68 @@ impl<'a> Cpu<'a> {
     fn get_hl(&self) -> u16 { ((self.h as u16) << 8) | (self.l as u16) }
     fn set_hl(&mut self, value: u16) { self.h = (value >> 8) as u8; self.l = (value & 0x00FF) as u8; }
 
-    // --- Flag Manipulation Helpers ---
-    // (Unchanged - correct)
-    fn set_flag(&mut self, flag_mask: u8, set: bool) { if set { self.f |= flag_mask; } else { self.f &= !flag_mask; } }
+    // --- Flag Manipulation Helpers --- No changes needed ---
+    fn set_flag(&mut self, flag_mask: u8, set: bool) {
+        if set { self.f |= flag_mask; } else { self.f &= !flag_mask; }
+        self.f &= 0xF0; // Ensure lower bits are always zero
+    }
     fn get_flag(&self, flag_mask: u8) -> bool { (self.f & flag_mask) != 0 }
 
      // --- CPU State Control ---
-     fn halt(&mut self) {
-        // HALT bug: If IME=0 and (IE & IF) != 0, HALT fails to stop execution,
-        // and the instruction *after* HALT is executed twice (PC doesn't increment).
-        // Simple check here, proper handling requires loop structure adjustment.
-        let ie = self.memory_bus.read_byte(IE_REGISTER);
-        let iflags = self.memory_bus.read_byte(IF_REGISTER);
-        if !self.ime && (ie & iflags) != 0 {
-            // HALT bug triggered - don't actually halt.
-            // The main loop should handle the no-PC-increment issue.
-            // For now, we just don't set self.halted = true;
-            println!("WARN: HALT bug triggered? IME=0, IE&IF={:02X}", ie & iflags);
+     // Takes memory_bus to check for HALT bug condition
+     fn halt(&mut self, memory_bus: &MemoryBus) -> u8 {
+        let ie = memory_bus.read_byte(IE_REGISTER);
+        let iflags = memory_bus.read_byte(IF_REGISTER);
+        // HALT bug condition: IME=0 and IE & IF has pending interrupts
+        if !self.ime && (ie & iflags & 0x1F) != 0 {
+            // HALT bug triggered. Don't set self.halted = true;
+            // PC increment is handled in `step` by checking this condition again.
+             println!("WARN: HALT executed with IME=0 and pending interrupt (IE&IF={:02X}). HALT bug behavior.", ie & iflags);
+            // No actual halt occurs, instruction proceeds (but PC doesn't increment correctly - handled in step)
         } else {
             self.halted = true;
         }
+        4 // HALT instruction itself takes 4 cycles
     }
 
-    // --- Instruction Helpers (Examples - Need to implement all ALU/CB ops) ---
+    // --- Instruction Helpers ---
 
-    // JR cc, r8
-    fn jr_cc(&mut self, condition: bool) -> u8 {
-        let relative_offset = self.fetch_byte() as i8; // Read signed offset
+    // JR cc, r8 (fetches immediate byte)
+    fn jr_cc(&mut self, condition: bool, memory_bus: &mut MemoryBus) -> u8 {
+        let relative_offset = self.fetch_byte(memory_bus) as i8;
         if condition {
-            // Jump taken
             let current_pc = self.pc;
-            self.pc = current_pc.wrapping_add(relative_offset as i16 as u16); // Signed addition
+            self.pc = current_pc.wrapping_add(relative_offset as i16 as u16);
             12 // 3 M-cycles
         } else {
-            // Jump not taken
             8 // 2 M-cycles
         }
     }
 
-    // INC r8
+    // INC r8 (no memory access)
     fn inc_u8(&mut self, value: u8) -> u8 {
         let result = value.wrapping_add(1);
         self.set_flag(FLAG_Z, result == 0);
         self.set_flag(FLAG_N, false);
-        // Half carry: check if bit 3 overflows into bit 4
-        self.set_flag(FLAG_H, (value & 0x0F) + 1 > 0x0F);
-        // C flag is not affected by INC
+        self.set_flag(FLAG_H, (value & 0x0F) == 0x0F); // Half carry if lower nibble was F
+        // C unchanged
         result
     }
 
-    // DEC r8
+    // DEC r8 (no memory access)
     fn dec_u8(&mut self, value: u8) -> u8 {
         let result = value.wrapping_sub(1);
         self.set_flag(FLAG_Z, result == 0);
         self.set_flag(FLAG_N, true);
-        // Half borrow: check if lower nibble borrowed from bit 4 (0x0F -> 0x0E is fine, 0x00 -> 0xFF borrows)
-        self.set_flag(FLAG_H, (value & 0x0F) == 0);
-        // C flag is not affected by DEC
+        self.set_flag(FLAG_H, (value & 0x0F) == 0x00); // Half borrow if lower nibble was 0
+        // C unchanged
         result
     }
 
-     // ADD HL, rr
+     // ADD HL, rr (no memory access)
      fn add_hl(&mut self, value: u16) {
         let hl = self.get_hl();
         let (result, carry) = hl.overflowing_add(value);
-        // Half carry check: Add lower bytes, check carry from bit 11 to 12
         let half_carry = (hl & 0x0FFF) + (value & 0x0FFF) > 0x0FFF;
 
         self.set_hl(result);
@@ -988,70 +889,53 @@ impl<'a> Cpu<'a> {
      }
 
 
-    // LD r8, r8' (Generic handler for 0x40-0x7F range, excluding HALT)
-    fn ld_r8_r8(&mut self, opcode: u8) -> u8 {
-        let source_reg_code = opcode & 0x07; // B=0, C=1, D=2, E=3, H=4, L=5, (HL)=6, A=7
-        let dest_reg_code = (opcode >> 3) & 0x07; // Same coding
+    // LD r8, r8' / LD r, (HL) / LD (HL), r
+    fn ld_r8_r8(&mut self, opcode: u8, memory_bus: &mut MemoryBus) -> u8 {
+        let source_reg_code = opcode & 0x07;
+        let dest_reg_code = (opcode >> 3) & 0x07;
 
-        // Reading from (HL) takes longer
-        let read_cycles = if source_reg_code == 6 { 8 } else { 4 };
-        // Writing to (HL) takes longer
-        let write_cycles = if dest_reg_code == 6 { 8 } else { 4 };
+        let is_source_hl = source_reg_code == 6;
+        let is_dest_hl = dest_reg_code == 6;
 
-        // If source and dest are both (HL), it still only takes 8 cycles total? Check manuals.
-        // Let's assume simple case: base 4 + extra 4 if source is (HL) + extra 4 if dest is (HL) is wrong.
-        // It's just 4 cycles for reg-reg, 8 cycles for reg-(HL) or (HL)-reg.
-
-         let value = match source_reg_code {
-             0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
-             4 => self.h, 5 => self.l, 6 => self.memory_bus.read_byte(self.get_hl()), 7 => self.a,
-             _ => unreachable!(),
-         };
-
-         match dest_reg_code {
-             0 => self.b = value, 1 => self.c = value, 2 => self.d = value, 3 => self.e = value,
-             4 => self.h = value, 5 => self.l = value,
-             6 => self.memory_bus.write_byte(self.get_hl(), value),
-             7 => self.a = value,
-             _ => unreachable!(),
-         };
-
-         if source_reg_code == 6 || dest_reg_code == 6 { 8 } else { 4 }
-    }
-
-    // Basic ALU operation handler (Needs more work for flags and (HL))
-    fn alu_op(&mut self, opcode: u8) {
-        let operation = (opcode >> 3) & 0x07; // 0:ADD, 1:ADC, 2:SUB, 3:SBC, 4:AND, 5:XOR, 6:OR, 7:CP
-        let operand_code = opcode & 0x07; // 0:B..7:A, 6=(HL)
-
-        // TODO: Handle read from (HL) taking longer
-        let operand = match operand_code {
-            0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
-            4 => self.h, 5 => self.l, 6 => self.memory_bus.read_byte(self.get_hl()), 7 => self.a,
-             _ => unreachable!(),
+        let value = if is_source_hl {
+            memory_bus.read_byte(self.get_hl())
+        } else {
+            match source_reg_code {
+                 0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
+                 4 => self.h, 5 => self.l, 7 => self.a,
+                 _ => unreachable!(),
+            }
         };
 
-        match operation {
-            0 => self.add_a(operand, false), // ADD
-            1 => self.add_a(operand, true),  // ADC
-            2 => self.sub_a(operand, false), // SUB
-            3 => self.sub_a(operand, true),  // SBC
-            4 => self.and_a(operand),        // AND
-            5 => self.xor_a(operand),        // XOR
-            6 => self.or_a(operand),         // OR
-            7 => self.cp_a(operand),         // CP
+         if is_dest_hl {
+            memory_bus.write_byte(self.get_hl(), value);
+         } else {
+             match dest_reg_code {
+                 0 => self.b = value, 1 => self.c = value, 2 => self.d = value, 3 => self.e = value,
+                 4 => self.h = value, 5 => self.l = value, 7 => self.a = value,
+                 _ => unreachable!(),
+             };
+         }
+
+         if is_source_hl || is_dest_hl { 8 } else { 4 }
+    }
+
+    // Helper to get operand for ALU operations (handles (HL) read)
+    fn get_alu_operand(&self, operand_code: u8, memory_bus: &MemoryBus) -> u8 {
+        match operand_code {
+            0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
+            4 => self.h, 5 => self.l, 6 => memory_bus.read_byte(self.get_hl()), 7 => self.a,
              _ => unreachable!(),
         }
     }
 
-     // --- Actual ALU operations ---
+
+     // --- Actual ALU operations --- No changes needed (no memory access) ---
      fn add_a(&mut self, value: u8, use_carry: bool) {
         let carry_in = if use_carry && self.get_flag(FLAG_C) { 1 } else { 0 };
         let (res1, c1) = self.a.overflowing_add(value);
         let (result, c2) = res1.overflowing_add(carry_in);
         let carry_out = c1 || c2;
-
-        // Half carry: Check carry from bit 3 to bit 4
         let half_carry = (self.a & 0x0F) + (value & 0x0F) + carry_in > 0x0F;
 
         self.a = result;
@@ -1062,50 +946,47 @@ impl<'a> Cpu<'a> {
     }
 
      fn sub_a(&mut self, value: u8, use_carry: bool) {
-        let carry_in = if use_carry && self.get_flag(FLAG_C) { 1 } else { 0 }; // Carry acts as borrow here
+        let carry_in = if use_carry && self.get_flag(FLAG_C) { 1 } else { 0 };
         let (res1, b1) = self.a.overflowing_sub(value);
         let (result, b2) = res1.overflowing_sub(carry_in);
         let borrow_out = b1 || b2;
-
-        // Half borrow: Check borrow from bit 4 for bit 3
         let half_borrow = (self.a & 0x0F) < (value & 0x0F) + carry_in;
 
         self.a = result;
         self.set_flag(FLAG_Z, result == 0);
         self.set_flag(FLAG_N, true);
         self.set_flag(FLAG_H, half_borrow);
-        self.set_flag(FLAG_C, borrow_out); // Borrow becomes carry flag
+        self.set_flag(FLAG_C, borrow_out);
     }
 
     fn and_a(&mut self, value: u8) {
         self.a &= value;
         self.set_flag(FLAG_Z, self.a == 0);
         self.set_flag(FLAG_N, false);
-        self.set_flag(FLAG_H, true); // AND sets H flag
+        self.set_flag(FLAG_H, true);
         self.set_flag(FLAG_C, false);
     }
 
     fn xor_a(&mut self, value: u8) {
         self.a ^= value;
         self.set_flag(FLAG_Z, self.a == 0);
-        self.set_flag(FLAG_N | FLAG_H | FLAG_C, false); // XOR clears N, H, C
+        self.set_flag(FLAG_N | FLAG_H | FLAG_C, false);
     }
 
     fn or_a(&mut self, value: u8) {
         self.a |= value;
         self.set_flag(FLAG_Z, self.a == 0);
-        self.set_flag(FLAG_N | FLAG_H | FLAG_C, false); // OR clears N, H, C
+        self.set_flag(FLAG_N | FLAG_H | FLAG_C, false);
     }
 
      fn cp_a(&mut self, value: u8) {
-         // CP performs a subtraction but discards the result, only setting flags
-        let temp_a = self.a; // Keep original A
-        self.sub_a(value, false); // Perform SUB logic
+        let temp_a = self.a;
+        self.sub_a(value, false); // Use sub logic for flags
         self.a = temp_a; // Restore A
      }
 
 
-      // --- CB Prefix Operations ---
+    // --- CB Prefix Operations --- No changes needed (no memory access) ---
     fn rlc(&mut self, value: u8) -> u8 {
         let carry = (value >> 7) & 1;
         let result = value.rotate_left(1);
@@ -1163,7 +1044,7 @@ impl<'a> Cpu<'a> {
      }
 
      fn swap(&mut self, value: u8) -> u8 {
-         let result = value.rotate_right(4); // Swaps upper and lower nibbles
+         let result = value.rotate_left(4); // Swaps upper and lower nibbles
          self.set_flag(FLAG_Z, result == 0);
          self.set_flag(FLAG_N | FLAG_H | FLAG_C, false);
          result
@@ -1183,14 +1064,61 @@ impl<'a> Cpu<'a> {
          self.set_flag(FLAG_Z, result_zero);
          self.set_flag(FLAG_N, false);
          self.set_flag(FLAG_H, true);
-         // C flag is not affected by BIT
+         // C unchanged
      }
 
-    // --- Public accessors (Optional, for debugging/external interaction) ---
+    // --- Public accessors --- No changes needed ---
     pub fn pc(&self) -> u16 { self.pc }
     pub fn sp(&self) -> u16 { self.sp }
-    pub fn registers(&self) -> (u8, u8, u8, u8, u8, u8, u8, u8) { (self.a, self.f, self.b, self.c, self.d, self.e, self.h, self.l) }
+    pub fn registers(&self) -> (u8, u8, u8, u8, u8, u8, u8, u8) { (self.a, self.f & 0xF0, self.b, self.c, self.d, self.e, self.h, self.l) }
     pub fn ime(&self) -> bool { self.ime }
     pub fn halted(&self) -> bool { self.halted }
     pub fn total_cycles(&self) -> u64 { self.total_cycles }
+
+    /// Helper to initialize I/O registers after CPU creation when skipping boot ROM.
+    /// This is needed because `Cpu::new` no longer takes a MemoryBus.
+    /// Call this *after* creating the CPU and *before* starting the execution loop.
+    pub fn initialize_post_boot_io(memory_bus: &mut MemoryBus) {
+        // Essential initial I/O register values (DMG)
+        memory_bus.write_byte(0xFF05, 0x00); // TIMA
+        memory_bus.write_byte(0xFF06, 0x00); // TMA
+        memory_bus.write_byte(0xFF07, 0x00); // TAC
+        memory_bus.write_byte(0xFF10, 0x80); // NR10
+        memory_bus.write_byte(0xFF11, 0xBF); // NR11
+        memory_bus.write_byte(0xFF12, 0xF3); // NR12
+        memory_bus.write_byte(0xFF14, 0xBF); // NR14
+        memory_bus.write_byte(0xFF16, 0x3F); // NR21
+        memory_bus.write_byte(0xFF17, 0x00); // NR22
+        memory_bus.write_byte(0xFF19, 0xBF); // NR24
+        memory_bus.write_byte(0xFF1A, 0x7F); // NR30
+        memory_bus.write_byte(0xFF1B, 0xFF); // NR31
+        memory_bus.write_byte(0xFF1C, 0x9F); // NR32
+        memory_bus.write_byte(0xFF1E, 0xBF); // NR33
+        memory_bus.write_byte(0xFF20, 0xFF); // NR41
+        memory_bus.write_byte(0xFF21, 0x00); // NR42
+        memory_bus.write_byte(0xFF22, 0x00); // NR43
+        memory_bus.write_byte(0xFF23, 0xBF); // NR44
+        memory_bus.write_byte(0xFF24, 0x77); // NR50
+        memory_bus.write_byte(0xFF25, 0xF3); // NR51
+        // NOTE: NR52 value differs slightly between DMG (F1) and SGB (F0)
+        memory_bus.write_byte(0xFF26, 0xF1); // NR52 - F1 for DMG
+        memory_bus.write_byte(0xFF40, 0x91); // LCDC
+        // STAT initial state - mode often depends on timing, 0x85 is a common post-boot value
+        memory_bus.write_byte(0xFF41, 0x85); // STAT
+        memory_bus.write_byte(0xFF42, 0x00); // SCY
+        memory_bus.write_byte(0xFF43, 0x00); // SCX
+        memory_bus.write_byte(0xFF44, 0x00); // LY - Should start at 0, will increment
+        memory_bus.write_byte(0xFF45, 0x00); // LYC
+        memory_bus.write_byte(0xFF47, 0xFC); // BGP
+        memory_bus.write_byte(0xFF48, 0xFF); // OBP0
+        memory_bus.write_byte(0xFF49, 0xFF); // OBP1
+        memory_bus.write_byte(0xFF4A, 0x00); // WY
+        memory_bus.write_byte(0xFF4B, 0x00); // WX
+        memory_bus.write_byte(IE_REGISTER, 0x00);  // IE
+        // IF often starts non-zero (e.g., 0xE1) after boot ROM, indicating VBLANK occurred.
+        // Starting clean might be simpler for emulation unless precise boot is needed.
+        memory_bus.write_byte(IF_REGISTER, 0x00); // IF (starting clean)
+        // Write 0x01 to 0xFF50 to disable boot ROM mapping (MemoryBus usually handles this logic)
+        memory_bus.write_byte(0xFF50, 0x01);
+    }
 }

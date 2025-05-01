@@ -27,26 +27,22 @@ const IF_REGISTER: u16 = 0xFF0F; // Interrupt Flag Register address
 // No longer needs lifetime 'a as memory_bus is passed in methods
 pub struct Cpu {
     // Registers
-    a: u8, // Accumulator
-    f: u8, // Flags register (ZNHC----)
-    b: u8,
-    c: u8,
-    d: u8,
-    e: u8,
-    h: u8,
-    l: u8,
-
-    sp: u16, // Stack Pointer
-    pc: u16, // Program Counter
-
+pub    a: u8, // Accumulator
+pub    f: u8, // Flags register (ZNHC----)
+pub    b: u8,
+pub    c: u8,
+pub    d: u8,
+pub    e: u8,
+pub    h: u8,
+pub    l: u8,
+pub    sp: u16, // Stack Pointer
+pub    pc: u16, // Program Counter
     // memory_bus: &'a mut MemoryBus, <-- REMOVED
-
-    ime: bool,        // Interrupt Master Enable flag (true=enabled, false=disabled)
-    halted: bool,     // Is the CPU currently halted?
-    stop_requested: bool, // Was STOP instruction executed?
-    ime_scheduled: bool, // Should IME be enabled after the next instruction?
-
-    total_cycles: u64 // For tracking total cycles executed (useful for timing)
+pub    ime: bool,        // Interrupt Master Enable flag (true=enabled, false=disabled)
+pub    halted: bool,     // Is the CPU currently halted?
+pub    stop_requested: bool, // Was STOP instruction executed?
+pub    ime_scheduled: bool, // Should IME be enabled after the next instruction?
+pub    total_cycles: u64 // For tracking total cycles executed (useful for timing)
 }
 
 // No longer needs lifetime 'a
@@ -1120,5 +1116,26 @@ impl Cpu {
         memory_bus.write_byte(IF_REGISTER, 0x00); // IF (starting clean)
         // Write 0x01 to 0xFF50 to disable boot ROM mapping (MemoryBus usually handles this logic)
         memory_bus.write_byte(0xFF50, 0x01);
+    }
+    
+    pub fn disassemble_instruction(&self, address: u16, bus: &MemoryBus) -> (String, u8) {
+        // Implementation that reads bytes via `bus.read_byte(address)`,
+        // decodes the instruction at `address`, formats it into a String,
+        // and returns the string representation AND the length (in bytes)
+        // of that instruction (1, 2, or 3).
+        //
+        // Example placeholder (replace with actual disassembler logic):
+        let opcode = bus.read_byte(address);
+        match opcode {
+            0x00 => ("NOP".to_string(), 1),
+            0x31 => { // LD SP,d16
+               let lo = bus.read_byte(address.wrapping_add(1));
+               let hi = bus.read_byte(address.wrapping_add(2));
+               let d16 = u16::from_le_bytes([lo, hi]);
+               (format!("LD SP, ${:04X}", d16), 3)
+            }
+            // ... many more instructions ...
+            _ => (format!("DB ${:02X}", opcode), 1), // Default for unknown
+        }
     }
 }

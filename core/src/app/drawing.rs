@@ -1,261 +1,261 @@
+use sdl2::render::{Canvas, TextureCreator, TextureQuery};
+use sdl2::video::Window;
+use sdl2::rect::{Rect, Point};
 use sdl2::pixels::Color;
-use sdl2::rect::Rect;
-use sdl2::render::{Canvas, TextureCreator};
-use sdl2::video::{Window, WindowContext};
 use sdl2::ttf::Font;
 
-// Import constants from the *binary's* constants module
-use crate::constants; // <-- FIX 1
-
-// Import types from the *library* crate
+use super::constants; // Use constants from the same app module
 use boba::cpu::Cpu;
 use boba::memory_bus::MemoryBus;
-use boba::joypad::JoypadState; // <-- FIX 2
-use boba::ppu; // Import ppu module for its constants
+use boba::joypad::JoypadState; // Assuming this holds button states
 
-// --- Palettes --- (Keep or move to constants.rs)
-const PALETTE: [Color; 4] = constants::PALETTE;
-const DEBUG_PALETTE: [Color; 4] = constants::DEBUG_PALETTE;
-
-
-/// Renders text to the canvas.
-pub fn render_text(
+/// Draws the scaled Game Boy screen content to the canvas.
+pub fn draw_gb_screen(
     canvas: &mut Canvas<Window>,
-    texture_creator: &TextureCreator<WindowContext>,
-    font: &Font,
-    text: &str,
+    frame_buffer: &[u8], // Expects buffer of palette indices (0-3)
     x: i32,
     y: i32,
-    color: Color,
 ) -> Result<(), String> {
-    if text.is_empty() {
-        return Ok(());
+    // Ensure the buffer has the expected size
+    if frame_buffer.len() != (constants::GB_WIDTH * constants::GB_HEIGHT) as usize {
+        // This check might be too strict if the buffer format changes, but good for safety
+        // eprintln!( // Use eprintln for errors, not println
+        //     "Warning: Frame buffer size mismatch. Expected {}, got {}.",
+        //     constants::GB_WIDTH * constants::GB_HEIGHT,
+        //     frame_buffer.len()
+        // );
+        // Allow drawing anyway, but it might look wrong or panic if smaller
     }
-    let surface = font
-        .render(text)
-        .blended(color)
-        .map_err(|e| e.to_string())?;
-    let texture = texture_creator
-        .create_texture_from_surface(&surface)
-        .map_err(|e| e.to_string())?;
 
-    // Use query() to get the texture dimensions
-    let texture_query = texture.query();
-    let text_rect = Rect::new(x, y, texture_query.width, texture_query.height);
+    let scale = constants::GB_SCALE_FACTOR as i32;
+    let scaled_width = constants::GB_WIDTH as i32 * scale;
+    let scaled_height = constants::GB_HEIGHT as i32 * scale;
 
-    canvas.copy(&texture, None, Some(text_rect))?;
+    // Optional: Draw a background or border for the GB screen area
+    canvas.set_draw_color(Color::RGB(10, 10, 10));
+    canvas.fill_rect(Rect::new(x, y, scaled_width as u32, scaled_height as u32))?;
+
+    for py in 0..constants::GB_HEIGHT {
+        for px in 0..constants::GB_WIDTH {
+            let index = (py * constants::GB_WIDTH + px) as usize;
+            if index >= frame_buffer.len() { continue; } // Prevent out-of-bounds if buffer is too small
+
+            let color_index = frame_buffer[index];
+            let color = constants::PALETTE[color_index as usize % 4]; // Modulo 4 for safety
+
+            canvas.set_draw_color(color);
+
+            let dest_x = x + (px as i32 * scale);
+            let dest_y = y + (py as i32 * scale);
+            let dest_rect = Rect::new(dest_x, dest_y, scale as u32, scale as u32);
+
+            canvas.fill_rect(dest_rect)?;
+        }
+    }
+    Ok(())
+}
+
+/// Draws the VRAM tile data debug view.
+pub fn draw_vram_debug(
+    canvas: &mut Canvas<Window>,
+    vram_buffer: &[u8], // Expects buffer of palette indices (0-3) for the debug view pixels
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    // Use the native dimensions from the PPU constants (if available) or recalculate
+    let native_width = constants::VRAM_VIEW_WIDTH / constants::VRAM_DEBUG_SCALE_FACTOR;
+    let native_height = constants::VRAM_VIEW_HEIGHT / constants::VRAM_DEBUG_SCALE_FACTOR;
+
+    if vram_buffer.len() != (native_width * native_height) as usize {
+         // eprintln!(
+         //     "Warning: VRAM debug buffer size mismatch. Expected {}, got {}.",
+         //      native_width * native_height,
+         //      vram_buffer.len()
+         // );
+         // Allow drawing anyway
+    }
+
+    let scale = constants::VRAM_DEBUG_SCALE_FACTOR as i32;
+
+    // Draw background for VRAM view area
+    canvas.set_draw_color(constants::DEBUG_BACKGROUND_COLOR);
+    canvas.fill_rect(Rect::new(x, y, constants::VRAM_VIEW_WIDTH, constants::VRAM_VIEW_HEIGHT))?;
+
+
+    for py in 0..native_height {
+        for px in 0..native_width {
+            let index = (py * native_width + px) as usize;
+             if index >= vram_buffer.len() { continue; } // Prevent out-of-bounds
+
+            let color_index = vram_buffer[index];
+            let color = constants::DEBUG_PALETTE[color_index as usize % 4]; // Use debug palette
+
+            canvas.set_draw_color(color);
+
+            let dest_x = x + (px as i32 * scale);
+            let dest_y = y + (py as i32 * scale);
+            let dest_rect = Rect::new(dest_x, dest_y, scale as u32, scale as u32);
+
+            canvas.fill_rect(dest_rect)?;
+        }
+    }
+
     Ok(())
 }
 
 
-/// Draws the main Game Boy screen content.
-pub fn draw_gb_screen(canvas: &mut Canvas<Window>, frame_buffer: &[u8], target_x: i32, target_y: i32) {
-    let expected_len = (constants::GB_WIDTH * constants::GB_HEIGHT) as usize;
-    if frame_buffer.len() != expected_len {
-        eprintln!(
-            "Error: Frame buffer size mismatch! Expected {}, got {}",
-            expected_len,
-            frame_buffer.len()
-        );
-        return;
-    }
-    for y in 0..constants::GB_HEIGHT {
-        for x in 0..constants::GB_WIDTH {
-            let index = (y * constants::GB_WIDTH + x) as usize;
-            // Safely get pixel, default to 0, ensure index is valid
-            let shade_index = frame_buffer.get(index).copied().unwrap_or(0) % 4;
-            let color = PALETTE[shade_index as usize];
-
-            canvas.set_draw_color(color);
-            let rect = Rect::new(
-                target_x + (x * constants::GB_SCALE_FACTOR) as i32,
-                target_y + (y * constants::GB_SCALE_FACTOR) as i32,
-                constants::GB_SCALE_FACTOR,
-                constants::GB_SCALE_FACTOR,
-            );
-            // Use fill_rect which is usually faster for solid colors
-            canvas.fill_rect(rect).unwrap_or_else(|e| eprintln!("Failed to draw GB pixel: {}", e));
-        }
-    }
-}
-
-/// Draws the VRAM tile data debug view.
-pub fn draw_vram_debug(canvas: &mut Canvas<Window>, vram_buffer: &[u8], target_x: i32, target_y: i32) {
-    // Use the constants exported from the ppu module if available and public
-    let vram_debug_width = ppu::VRAM_DEBUG_WIDTH;
-    let vram_debug_height = ppu::VRAM_DEBUG_HEIGHT;
-    let expected_len = vram_debug_width * vram_debug_height;
-
-    if vram_buffer.len() != expected_len {
-        eprintln!(
-            "Error: VRAM debug buffer size mismatch! Expected {}, got {}",
-            expected_len,
-            vram_buffer.len()
-        );
-        return;
-    }
-
-    for y in 0..vram_debug_height {
-        for x in 0..vram_debug_width {
-            let index = y * vram_debug_width + x;
-            let shade_index = vram_buffer.get(index).copied().unwrap_or(0) % 4;
-            let color = DEBUG_PALETTE[shade_index as usize];
-
-            canvas.set_draw_color(color);
-            let rect = Rect::new(
-                target_x + (x as u32 * constants::VRAM_DEBUG_SCALE_FACTOR) as i32,
-                target_y + (y as u32 * constants::VRAM_DEBUG_SCALE_FACTOR) as i32,
-                constants::VRAM_DEBUG_SCALE_FACTOR,
-                constants::VRAM_DEBUG_SCALE_FACTOR,
-            );
-             canvas.fill_rect(rect).unwrap_or_else(|e| eprintln!("Failed to draw VRAM pixel: {}", e));
-        }
-    }
-}
-
-
-/// Draws the joypad input state indicators.
-pub fn draw_input_debug(
-    canvas: &mut Canvas<Window>,
-    joypad_state: &JoypadState,
-    target_x: i32,
-    target_y: i32,
-) {
-    let mut draw_indicator = |is_pressed: bool, x_offset: i32, y_offset: i32| {
-        let color = if is_pressed {
-            constants::DEBUG_INPUT_PRESSED_COLOR
-        } else {
-            constants::DEBUG_INPUT_RELEASED_COLOR
-        };
-        canvas.set_draw_color(color);
-        let rect = Rect::new(
-            target_x + x_offset,
-            target_y + y_offset,
-            constants::DEBUG_INPUT_BOX_SIZE,
-            constants::DEBUG_INPUT_BOX_SIZE,
-        );
-        canvas.fill_rect(rect).unwrap_or_else(|e| eprintln!("Failed to draw input indicator: {}", e));
-    };
-
-    let pad_step = (constants::DEBUG_INPUT_BOX_SIZE + constants::DEBUG_INPUT_PADDING) as i32;
-    let dpad_center_x = pad_step;
-    let dpad_center_y = pad_step;
-
-    // Draw D-Pad
-    draw_indicator(joypad_state.up, dpad_center_x, dpad_center_y - pad_step);
-    draw_indicator(joypad_state.down, dpad_center_x, dpad_center_y + pad_step);
-    draw_indicator(joypad_state.left, dpad_center_x - pad_step, dpad_center_y);
-    draw_indicator(joypad_state.right, dpad_center_x + pad_step, dpad_center_y);
-
-    // Draw Action buttons
-    let action_start_x = constants::DPAD_AREA_WIDTH as i32 + constants::PADDING as i32;
-    let action_y1 = 0;
-    let action_y2 = pad_step;
-    draw_indicator(joypad_state.b, action_start_x, action_y1);
-    draw_indicator(joypad_state.a, action_start_x + pad_step, action_y1);
-    draw_indicator(joypad_state.select, action_start_x, action_y2);
-    draw_indicator(joypad_state.start, action_start_x + pad_step, action_y2);
-}
-
-
-/// Draws the CPU disassembly debug view.
+/// Draws the disassembly debug view around the current PC.
 pub fn draw_disassembly_debug(
     canvas: &mut Canvas<Window>,
-    texture_creator: &TextureCreator<WindowContext>,
+    texture_creator: &TextureCreator<sdl2::video::WindowContext>,
     font: &Font,
     cpu: &Cpu,
-    bus: &MemoryBus,
-    target_x: i32,
-    target_y: i32,
+    memory_bus: &MemoryBus,
+    pane_x: i32,
+    pane_y: i32,
 ) -> Result<(), String> {
-    // Use constants directly
-    let lines_before = constants::DISASM_LINES_BEFORE;
-    let lines_after = constants::DISASM_LINES_AFTER;
-    let area_width = constants::DISASM_AREA_WIDTH;
-    let area_height = constants::DISASM_AREA_HEIGHT;
-    let line_height = constants::DISASM_LINE_HEIGHT;
-
-    // Draw background
+    // Draw background for the disassembly pane
     canvas.set_draw_color(constants::DEBUG_BACKGROUND_COLOR);
-    let bg_rect = Rect::new(target_x, target_y, area_width, area_height);
-    canvas.fill_rect(bg_rect).map_err(|e| e.to_string())?;
+    canvas.fill_rect(Rect::new(pane_x, pane_y, constants::DISASM_AREA_WIDTH, constants::DISASM_AREA_HEIGHT))?;
 
-    let current_pc = cpu.pc(); // Use accessor
-    let total_lines = lines_before + 1 + lines_after;
-    let mut instructions: Vec<(u16, String)> = Vec::with_capacity(total_lines);
+    let pc = cpu.pc();
+    let mut current_addr = pc; // Start disassembling near PC
 
-    // Disassemble Forwards
-    let mut current_addr = current_pc;
-    for _ in 0..=lines_after {
-        let (disasm_text, instr_len) = cpu.disassemble_instruction(current_addr, bus);
-        instructions.push((current_addr, disasm_text));
-        if instr_len == 0 { // Avoid infinite loop on zero-length instruction (shouldn't happen)
-            current_addr = current_addr.wrapping_add(1); // Move forward anyway
+    // --- VERY Simple Disassembly Logic (Placeholder) ---
+    // A real disassembler is complex. This just shows bytes and a NOP example.
+    // It doesn't handle variable instruction lengths correctly for seeking backwards.
+    // We'll just display lines starting near PC.
+    // Try to start a few instructions before PC (rough estimate)
+    // This backward seeking is inherently flawed without full disassembly analysis.
+    let mut start_addr = pc.saturating_sub((constants::DISASM_LINES_BEFORE * 2) as u16); // Guess 2 bytes/instr avg
+
+    for i in 0..constants::DISASM_TOTAL_LINES {
+        let line_addr = start_addr;
+
+        // Fetch bytes (handle potential read errors gracefully, maybe show "??")
+        let byte1 = memory_bus.read_byte(start_addr);
+        let byte2 = memory_bus.read_byte(start_addr.wrapping_add(1));
+        let byte3 = memory_bus.read_byte(start_addr.wrapping_add(2));
+
+        // Placeholder disassembly: just show address and bytes
+        let mut disasm_text = format!("${:04X}: {:02X} {:02X} {:02X}", line_addr, byte1, byte2, byte3);
+        let mut instr_len: u16 = 1; // Default length
+
+        // Extremely basic instruction check (replace with actual disassembler call)
+        if byte1 == 0x00 { // NOP
+            disasm_text.push_str(" NOP");
+            instr_len = 1;
+        } else if byte1 == 0xC3 { // JP nn
+             let target = u16::from_le_bytes([byte2, byte3]);
+             disasm_text = format!("${:04X}: {:02X} {:02X} {:02X} JP ${:04X}", line_addr, byte1, byte2, byte3, target);
+             instr_len = 3;
         } else {
-            current_addr = current_addr.wrapping_add(instr_len as u16);
+             disasm_text.push_str(" ..."); // Indicate unknown instruction
+             instr_len = 1; // Guess length
         }
-        if instructions.len() > total_lines * 2 { break; } // Safety break
-    }
-
-    // Disassemble Backwards (Approximate)
-    let mut start_addr = current_pc;
-    let mut backward_instructions = Vec::new();
-    for _ in 0..lines_before {
-        let mut found_prev = false;
-        // Try guessing previous instruction lengths (1 to 3 bytes)
-        for offset_guess in (1..=3).rev() {
-            if let Some(prev_addr_guess) = start_addr.checked_sub(offset_guess) {
-                 // Ensure guess is valid address range if needed, though wrap around is fine here
-                let (_, len_guess) = cpu.disassemble_instruction(prev_addr_guess, bus);
-                if len_guess == offset_guess as u8 && len_guess != 0 {
-                    start_addr = prev_addr_guess;
-                    let (disasm_text, _) = cpu.disassemble_instruction(start_addr, bus);
-                    backward_instructions.push((start_addr, disasm_text));
-                    found_prev = true;
-                    break; // Found a likely previous instruction
-                }
-            }
-        }
-        if !found_prev { break; } // Couldn't find a valid previous instruction
-    }
-    // Combine backward and forward disassembly, ensuring PC is roughly centered
-    backward_instructions.reverse();
-    instructions = [backward_instructions, instructions].concat();
 
 
-    // Render the collected lines, trying to keep PC centered
-    let mut current_y = target_y;
-    let pc_index_maybe = instructions.iter().position(|(addr, _)| *addr == current_pc);
-
-    let start_render_idx = if let Some(pc_index) = pc_index_maybe {
-        pc_index.saturating_sub(lines_before)
-    } else {
-         // If PC wasn't found (e.g., during backward scan fail), start from beginning
-        0
-    };
-
-    for (idx, (addr, text)) in instructions.iter().enumerate().skip(start_render_idx) {
-        // Don't render more lines than fit in the area
-        if (idx - start_render_idx) >= total_lines { break; }
-
-        let display_text = format!("{:04X}: {}", addr, text);
-        let color = if *addr == current_pc {
+        // Determine text color
+        let text_color = if line_addr == pc {
             constants::DEBUG_PC_COLOR
         } else {
             constants::DEBUG_TEXT_COLOR
         };
 
-        render_text(
-            canvas,
-            texture_creator,
-            font,
-            &display_text,
-            target_x + 5, // Small padding
-            current_y,
-            color,
-        )?;
-        current_y += line_height as i32;
+        // Render the text line
+        let surface = font.render(&disasm_text)
+            .blended(text_color) // Use blended for potentially better quality
+            .map_err(|e| e.to_string())?;
+
+        let texture = texture_creator.create_texture_from_surface(&surface)
+            .map_err(|e| e.to_string())?;
+
+        let TextureQuery { width: text_width, height: text_height, .. } = texture.query();
+
+        // Calculate Y position for this line **USING i32 CASTING**
+        let current_line_y = pane_y + (i as i32 * constants::DISASM_LINE_HEIGHT as i32);
+
+        // Define destination rectangle for the text
+        let dest_rect = Rect::new(pane_x + 5, current_line_y, text_width, text_height); // Add padding
+
+        // Copy the texture to the canvas
+        canvas.copy(&texture, None, Some(dest_rect))?;
+
+        // Advance address for the next line based on *guessed* instruction length
+         start_addr = start_addr.wrapping_add(instr_len);
+
+        // Simple protection against infinite loops if instr_len is 0 (shouldn't happen)
+        if instr_len == 0 {
+             start_addr = start_addr.wrapping_add(1);
+        }
     }
+
+    Ok(())
+}
+
+/// Draws the input state debug view.
+pub fn draw_input_debug(
+    canvas: &mut Canvas<Window>,
+    joypad_state: &JoypadState, // Expecting the state struct
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    // Draw background for input view area
+    canvas.set_draw_color(constants::DEBUG_BACKGROUND_COLOR);
+    canvas.fill_rect(Rect::new(x, y, constants::INPUT_DEBUG_AREA_WIDTH, constants::INPUT_DEBUG_AREA_HEIGHT))?;
+
+
+    let box_size = constants::DEBUG_INPUT_BOX_SIZE;
+    let pad = constants::DEBUG_INPUT_PADDING;
+
+    // --- D-Pad ---
+    let dpad_base_x = x + 5; // Add some padding from pane edge
+    let dpad_base_y = y + (constants::INPUT_DEBUG_AREA_HEIGHT as i32 / 2) - (constants::DPAD_AREA_HEIGHT as i32 / 2); // Center vertically
+
+    // Up
+    let up_color = if joypad_state.up { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(up_color);
+    canvas.fill_rect(Rect::new(dpad_base_x + box_size as i32 + pad as i32, dpad_base_y, box_size, box_size))?;
+
+    // Down
+    let down_color = if joypad_state.down { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(down_color);
+    canvas.fill_rect(Rect::new(dpad_base_x + box_size as i32 + pad as i32, dpad_base_y + 2 * (box_size as i32 + pad as i32), box_size, box_size))?;
+
+    // Left
+    let left_color = if joypad_state.left { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(left_color);
+    canvas.fill_rect(Rect::new(dpad_base_x, dpad_base_y + box_size as i32 + pad as i32, box_size, box_size))?;
+
+    // Right
+    let right_color = if joypad_state.right { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(right_color);
+    canvas.fill_rect(Rect::new(dpad_base_x + 2 * (box_size as i32 + pad as i32), dpad_base_y + box_size as i32 + pad as i32, box_size, box_size))?;
+
+
+    // --- Action Buttons ---
+    let buttons_base_x = dpad_base_x + constants::DPAD_AREA_WIDTH as i32 + constants::PADDING as i32;
+    let buttons_base_y = y + (constants::INPUT_DEBUG_AREA_HEIGHT as i32 / 2) - (constants::BUTTONS_AREA_HEIGHT as i32 / 2); // Center vertically
+
+    // B
+    let b_color = if joypad_state.b { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(b_color);
+    canvas.fill_rect(Rect::new(buttons_base_x, buttons_base_y + box_size as i32 / 2, box_size, box_size))?; // Align B slightly lower maybe
+
+    // A
+    let a_color = if joypad_state.a { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(a_color);
+    canvas.fill_rect(Rect::new(buttons_base_x + box_size as i32 + pad as i32, buttons_base_y, box_size, box_size))?; // Align A slightly higher
+
+    // Select
+    let select_color = if joypad_state.select { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(select_color);
+    canvas.fill_rect(Rect::new(buttons_base_x + box_size as i32 / 2, buttons_base_y + box_size as i32 + pad as i32 + box_size as i32 / 2, box_size + pad, box_size / 2))?; // Small rect for select
+
+     // Start
+    let start_color = if joypad_state.start { constants::DEBUG_INPUT_PRESSED_COLOR } else { constants::DEBUG_INPUT_RELEASED_COLOR };
+    canvas.set_draw_color(start_color);
+    canvas.fill_rect(Rect::new(buttons_base_x + box_size as i32 + pad as i32 * 2, buttons_base_y + box_size as i32 + pad as i32 + box_size as i32 / 2, box_size + pad, box_size / 2))?; // Small rect for start
 
     Ok(())
 }

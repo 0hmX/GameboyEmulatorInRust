@@ -1,5 +1,3 @@
-
-https://github.com/user-attachments/assets/13f8f7b2-9fff-4504-9b34-b216824dd7db
 # Boba - A Game Boy Emulator in Rust
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen) <!-- Optional: Link to your CI build status -->

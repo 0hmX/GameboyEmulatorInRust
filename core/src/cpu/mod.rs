@@ -1,5 +1,3 @@
-// src/cpu/mod.rs
-
 //! The Sharp SM83 CPU core implementation.
 
 use crate::memory_map::{JOYPAD_INTERRUPT_BIT, LCD_STAT_INTERRUPT_BIT, SERIAL_INTERRUPT_BIT, TIMER_INTERRUPT_BIT, VBLANK_INTERRUPT_BIT};

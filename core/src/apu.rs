@@ -86,14 +86,12 @@ pub struct Apu {
     nr43: u8,
     nr44: u8,
 
-
     // --- Channel State (Placeholders - requires detailed implementation) ---
     // TODO: Replace these with actual channel state structs
     ch1_active: bool,
     ch2_active: bool,
     ch3_active: bool,
     ch4_active: bool,
-
     // Add full state for each channel here...
 }
 
@@ -179,21 +177,21 @@ impl Apu {
             NR10_ADDR => self.nr10 | 0x80, // Bits 0-6 readable, bit 7 often reads 1
             NR11_ADDR => self.nr11 | 0x3F, // Only bits 6-7 (Duty) readable
             NR12_ADDR => self.nr12,
-            NR13_ADDR => 0xFF, // Write-only
+            NR13_ADDR => 0xFF,             // Write-only
             NR14_ADDR => self.nr14 | 0xBF, // Only bit 6 (Length Enable) readable
 
             // --- Channel 2: Pulse B ---
             // NR20 does not exist
             NR21_ADDR => self.nr21 | 0x3F, // Only bits 6-7 (Duty) readable
             NR22_ADDR => self.nr22,
-            NR23_ADDR => 0xFF, // Write-only
+            NR23_ADDR => 0xFF,             // Write-only
             NR24_ADDR => self.nr24 | 0xBF, // Only bit 6 (Length Enable) readable
 
             // --- Channel 3: Wave ---
             NR30_ADDR => self.nr30 | 0x7F, // Only bit 7 (DAC Enable) readable
-            NR31_ADDR => 0xFF, // Write-only (Length)
+            NR31_ADDR => 0xFF,             // Write-only (Length)
             NR32_ADDR => self.nr32 | 0x9F, // Only bits 5-6 (Volume) readable
-            NR33_ADDR => 0xFF, // Write-only (Freq Lo)
+            NR33_ADDR => 0xFF,             // Write-only (Freq Lo)
             NR34_ADDR => self.nr34 | 0xBF, // Only bit 6 (Length Enable) readable
 
             // --- Channel 4: Noise ---
@@ -209,12 +207,22 @@ impl Apu {
             NR52_ADDR => {
                 // Construct NR52 dynamically based on internal state
                 let mut nr52 = 0u8;
-                if self.apu_enabled { nr52 |= 0x80; }
+                if self.apu_enabled {
+                    nr52 |= 0x80;
+                }
                 // TODO: Update placeholder active flags from real channel state
-                if self.ch1_active { nr52 |= 0x01; }
-                if self.ch2_active { nr52 |= 0x02; }
-                if self.ch3_active { nr52 |= 0x04; }
-                if self.ch4_active { nr52 |= 0x08; }
+                if self.ch1_active {
+                    nr52 |= 0x01;
+                }
+                if self.ch2_active {
+                    nr52 |= 0x02;
+                }
+                if self.ch3_active {
+                    nr52 |= 0x04;
+                }
+                if self.ch4_active {
+                    nr52 |= 0x08;
+                }
                 nr52 | 0x70 // Bits 4-6 read as 1
             }
 
@@ -242,10 +250,10 @@ impl Apu {
 
         // --- If APU is disabled, most register writes are blocked ---
         if !self.apu_enabled {
-             if !(WAVE_RAM_START..=WAVE_RAM_END).contains(&addr) {
-                  // Block register writes if APU is off (except Wave RAM, handled by bus)
-                  return;
-             }
+            if !(WAVE_RAM_START..=WAVE_RAM_END).contains(&addr) {
+                // Block register writes if APU is off (except Wave RAM, handled by bus)
+                return;
+            }
         }
 
         // --- Handle writes to specific registers ---
@@ -253,30 +261,56 @@ impl Apu {
         // In a real HW impl, side effects might read the *new* value.
         match addr {
             // --- Channel 1 ---
-            NR10_ADDR => { self.nr10 = value; /* TODO: Update sweep state */ }
-            NR11_ADDR => { self.nr11 = value; /* TODO: Update length timer (bits 0-5), duty cycle (bits 6-7) */ }
-            NR12_ADDR => { self.nr12 = value; /* TODO: Update envelope state, check DAC power */ }
+            NR10_ADDR => {
+                self.nr10 = value; /* TODO: Update sweep state */
+            }
+            NR11_ADDR => {
+                self.nr11 = value; /* TODO: Update length timer (bits 0-5), duty cycle (bits 6-7) */
+            }
+            NR12_ADDR => {
+                self.nr12 = value; /* TODO: Update envelope state, check DAC power */
+            }
             NR13_ADDR => { /* Write-only, update internal freq state */ }
-            NR14_ADDR => { self.nr14 = value; /* TODO: Update freq hi, handle TRIGGER(7), update length enable(6) */ }
+            NR14_ADDR => {
+                self.nr14 = value; /* TODO: Update freq hi, handle TRIGGER(7), update length enable(6) */
+            }
 
             // --- Channel 2 ---
-            NR21_ADDR => { self.nr21 = value; /* TODO: Update length timer, duty cycle */ }
-            NR22_ADDR => { self.nr22 = value; /* TODO: Update envelope state, check DAC power */ }
+            NR21_ADDR => {
+                self.nr21 = value; /* TODO: Update length timer, duty cycle */
+            }
+            NR22_ADDR => {
+                self.nr22 = value; /* TODO: Update envelope state, check DAC power */
+            }
             NR23_ADDR => { /* Write-only, update internal freq state */ }
-            NR24_ADDR => { self.nr24 = value; /* TODO: Update freq hi, handle TRIGGER(7), update length enable(6) */ }
+            NR24_ADDR => {
+                self.nr24 = value; /* TODO: Update freq hi, handle TRIGGER(7), update length enable(6) */
+            }
 
             // --- Channel 3 ---
-            NR30_ADDR => { self.nr30 = value; /* TODO: Update DAC enable (bit 7) */ }
+            NR30_ADDR => {
+                self.nr30 = value; /* TODO: Update DAC enable (bit 7) */
+            }
             NR31_ADDR => { /* Write-only, update internal length state */ }
-            NR32_ADDR => { self.nr32 = value; /* TODO: Update volume level (bits 5-6) */ }
+            NR32_ADDR => {
+                self.nr32 = value; /* TODO: Update volume level (bits 5-6) */
+            }
             NR33_ADDR => { /* Write-only, update internal freq state */ }
-            NR34_ADDR => { self.nr34 = value; /* TODO: Update freq hi, handle TRIGGER(7), update length enable(6) */ }
+            NR34_ADDR => {
+                self.nr34 = value; /* TODO: Update freq hi, handle TRIGGER(7), update length enable(6) */
+            }
 
             // --- Channel 4 ---
             NR41_ADDR => { /* Write-only, update internal length state */ }
-            NR42_ADDR => { self.nr42 = value; /* TODO: Update envelope state, check DAC power */ }
-            NR43_ADDR => { self.nr43 = value; /* TODO: Update clock shift, width mode, dividing ratio */ }
-            NR44_ADDR => { self.nr44 = value; /* TODO: Handle TRIGGER(7), update length enable(6) */ }
+            NR42_ADDR => {
+                self.nr42 = value; /* TODO: Update envelope state, check DAC power */
+            }
+            NR43_ADDR => {
+                self.nr43 = value; /* TODO: Update clock shift, width mode, dividing ratio */
+            }
+            NR44_ADDR => {
+                self.nr44 = value; /* TODO: Handle TRIGGER(7), update length enable(6) */
+            }
 
             // --- Master Control ---
             NR50_ADDR => self.nr50 = value,
@@ -286,11 +320,13 @@ impl Apu {
         }
     }
 
-
     // --- Helper Functions for Frame Sequencer (Keep placeholders) ---
-    fn clock_length_counters(&mut self, _memory_bus: &MemoryBus) { /* TODO */ }
-    fn clock_sweep_unit(&mut self, _memory_bus: &MemoryBus) { /* TODO */ }
-    fn clock_envelope_units(&mut self, _memory_bus: &MemoryBus) { /* TODO */ }
+    fn clock_length_counters(&mut self, _memory_bus: &MemoryBus) { /* TODO */
+    }
+    fn clock_sweep_unit(&mut self, _memory_bus: &MemoryBus) { /* TODO */
+    }
+    fn clock_envelope_units(&mut self, _memory_bus: &MemoryBus) { /* TODO */
+    }
 
     /// Resets APU registers (mirrored state) and internal state when NR52 bit 7 is written to 0.
     fn reset_apu_state_and_registers(&mut self, memory_bus: &mut MemoryBus) {

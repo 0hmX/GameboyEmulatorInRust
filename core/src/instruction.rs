@@ -18,7 +18,12 @@ impl Instruction {
         cycles: u8,
         execute: fn(&mut Cpu, &mut MemoryBus) -> CpuResult<u16>,
     ) -> Self {
-        Instruction { mnemonic, length, cycles, execute }
+        Instruction {
+            mnemonic,
+            length,
+            cycles,
+            execute,
+        }
     }
 
     // Use the dedicated handler for invalid opcodes
@@ -39,9 +44,10 @@ macro_rules! instr {
     };
 }
 macro_rules! invalid {
-    () => { Instruction::invalid() };
+    () => {
+        Instruction::invalid()
+    };
 }
-
 
 lazy_static! {
     // Main instruction table (0x00 - 0xFF)

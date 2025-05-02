@@ -2,61 +2,52 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::mouse::MouseButton;
-use sdl2::render::{Canvas, TextureCreator}; // Import TextureCreator
-use sdl2::video::{Window, WindowContext}; // Import WindowContext
+use sdl2::render::{Canvas, TextureCreator};
+use sdl2::video::{Window, WindowContext};
 
-// --- TTF Imports ---
-use sdl2::ttf::{self, Font}; // Import ttf and Font
+use sdl2::ttf::{self, Font};
 
 use std::time::{Duration, Instant};
 use std::thread;
 use std::env;
 use std::path::Path;
 use std::cmp;
-use std::cell::RefCell; // Needed for shared mutable access if MemoryBus holds APU
-use std::rc::Rc;        // Needed for shared mutable access if MemoryBus holds APU
 
-// --- Emulator Core Imports ---
 use gameboy_emulator::memory_bus::{MemoryBus, JoypadState};
 use gameboy_emulator::cpu::Cpu;
 use gameboy_emulator::ppu::{Ppu, VRAM_DEBUG_WIDTH, VRAM_DEBUG_HEIGHT};
-use gameboy_emulator::apu::Apu; 
+use gameboy_emulator::apu::Apu;
 
-// --- Timing Constants ---
 const TARGET_FPS: u32 = 60;
 const TARGET_FRAME_DURATION: Duration = Duration::from_nanos((1_000_000_000 / TARGET_FPS) as u64);
 
-// --- CPU/Emulator Constants ---
 const CPU_FREQ_HZ: f64 = 4_194_304.0;
 const CYCLES_PER_FRAME: u32 = (CPU_FREQ_HZ / TARGET_FPS as f64) as u32;
 
-// --- Screen/Drawing Constants ---
 const GB_WIDTH: u32 = 160;
 const GB_HEIGHT: u32 = 144;
-const GB_SCALE_FACTOR: u32 = 3; // Adjusted scale slightly for more debug room
+const GB_SCALE_FACTOR: u32 = 3;
 const VRAM_DEBUG_SCALE_FACTOR: u32 = 2;
 const PADDING: u32 = 10;
 
-// --- Input Debug Visualizer Constants ---
-const DEBUG_INPUT_BOX_SIZE: u32 = 15; // Smaller boxes
+const DEBUG_INPUT_BOX_SIZE: u32 = 15;
 const DEBUG_INPUT_PADDING: u32 = 4;
 const DEBUG_INPUT_PRESSED_COLOR: Color = Color::RGB(50, 205, 50);
 const DEBUG_INPUT_RELEASED_COLOR: Color = Color::RGB(70, 70, 70);
 
-// --- Disassembly Debug Constants ---
 const FONT_PATH: &str = "/home/ankan/GameBoy/core/src/bin/Roboto-Regular.ttf"; // IMPORTANT: Change this path!
 const DEBUG_FONT_SIZE: u16 = 14;
-const DISASM_LINES_BEFORE: usize = 5; // Number of lines before PC
-const DISASM_LINES_AFTER: usize = 10; // Number of lines after (and including) PC
-const DISASM_LINE_HEIGHT: u32 = (DEBUG_FONT_SIZE + 2) as u32; // Font size + padding
-const DISASM_AREA_WIDTH: u32 = 300; // Estimated width needed
+const DISASM_LINES_BEFORE: usize = 5;
+const DISASM_LINES_AFTER: usize = 10;
+const DISASM_LINE_HEIGHT: u32 = (DEBUG_FONT_SIZE + 2) as u32; // Simple calculation is fine here
+const DISASM_AREA_WIDTH: u32 = 300;
+// Calculate DISASM_AREA_HEIGHT here as it doesn't use cmp::max
 const DISASM_AREA_HEIGHT: u32 = DISASM_LINE_HEIGHT * (DISASM_LINES_BEFORE + DISASM_LINES_AFTER + 1) as u32;
-const DEBUG_PC_COLOR: Color = Color::RGB(255, 255, 0); // Yellow for current PC line
-const DEBUG_TEXT_COLOR: Color = Color::RGB(220, 220, 220); // Light Gray for other lines
-const DEBUG_BACKGROUND_COLOR: Color = Color::RGB(30, 30, 30); // Darker background for text
+const DEBUG_PC_COLOR: Color = Color::RGB(255, 255, 0);
+const DEBUG_TEXT_COLOR: Color = Color::RGB(220, 220, 220);
+const DEBUG_BACKGROUND_COLOR: Color = Color::RGB(30, 30, 30);
 
-// --- Calculate Constant Dimensions ---
+// Basic dimensions calculated from other consts are okay
 const GB_SCREEN_WIDTH: u32 = GB_WIDTH * GB_SCALE_FACTOR;
 const GB_SCREEN_HEIGHT: u32 = GB_HEIGHT * GB_SCALE_FACTOR;
 const VRAM_VIEW_WIDTH: u32 = VRAM_DEBUG_WIDTH as u32 * VRAM_DEBUG_SCALE_FACTOR;
@@ -65,9 +56,8 @@ const DPAD_AREA_WIDTH: u32 = DEBUG_INPUT_BOX_SIZE * 3 + DEBUG_INPUT_PADDING * 2;
 const DPAD_AREA_HEIGHT: u32 = DEBUG_INPUT_BOX_SIZE * 3 + DEBUG_INPUT_PADDING * 2;
 const ACTION_AREA_WIDTH: u32 = DEBUG_INPUT_BOX_SIZE * 2 + DEBUG_INPUT_PADDING * 1;
 const ACTION_AREA_HEIGHT: u32 = DEBUG_INPUT_BOX_SIZE * 2 + DEBUG_INPUT_PADDING * 1;
-const INPUT_DEBUG_AREA_WIDTH: u32 = DPAD_AREA_WIDTH + PADDING + ACTION_AREA_WIDTH;
 
-// --- Palettes ---
+
 const PALETTE: [Color; 4] = [
     Color::RGB(0x9B, 0xBC, 0x0F), Color::RGB(0x8B, 0xAC, 0x0F),
     Color::RGB(0x30, 0x62, 0x30), Color::RGB(0x0F, 0x38, 0x0F),
@@ -79,9 +69,9 @@ const DEBUG_PALETTE: [Color; 4] = [
 
 pub type CpuResult<T> = Result<T, String>;
 
-// --- Drawing Helper Functions ---
 
-/// Renders text using SDL_ttf.
+// --- Drawing Helper Functions (Keep as they are: render_text, draw_gb_screen, draw_vram_debug, draw_input_debug, draw_disassembly_debug) ---
+// ... (Include the full code for the drawing helper functions here) ...
 fn render_text(
     canvas: &mut Canvas<Window>,
     texture_creator: &TextureCreator<WindowContext>,
@@ -92,10 +82,10 @@ fn render_text(
     color: Color,
 ) -> Result<(), String> {
     if text.is_empty() {
-        return Ok(()); // Nothing to render
+        return Ok(());
     }
     let surface = font.render(text)
-        .blended(color) // Use blended for nice anti-aliasing
+        .blended(color)
         .map_err(|e| e.to_string())?;
     let texture = texture_creator.create_texture_from_surface(&surface)
         .map_err(|e| e.to_string())?;
@@ -152,7 +142,14 @@ fn draw_vram_debug(canvas: &mut Canvas<Window>, vram_buffer: &[u8], target_x: i3
     }
 }
 
-fn draw_input_debug(canvas: &mut Canvas<Window>, joypad_state: &JoypadState, target_x: i32, target_y: i32) {
+fn draw_input_debug(
+    canvas: &mut Canvas<Window>,
+    joypad_state: &JoypadState,
+    target_x: i32,
+    target_y: i32,
+    // Pass calculated dimensions if needed, or recalculate locally if simple
+    // For now, it uses constants directly which is fine
+) {
     let mut draw_indicator = |is_pressed: bool, x_offset: i32, y_offset: i32| {
         let color = if is_pressed { DEBUG_INPUT_PRESSED_COLOR } else { DEBUG_INPUT_RELEASED_COLOR };
         canvas.set_draw_color(color);
@@ -169,23 +166,25 @@ fn draw_input_debug(canvas: &mut Canvas<Window>, joypad_state: &JoypadState, tar
     let dpad_center_x = pad_step;
     let dpad_center_y = pad_step;
 
+    // Draw D-Pad relative to target_x, target_y
     draw_indicator(joypad_state.up, dpad_center_x, dpad_center_y - pad_step);
     draw_indicator(joypad_state.down, dpad_center_x, dpad_center_y + pad_step);
     draw_indicator(joypad_state.left, dpad_center_x - pad_step, dpad_center_y);
     draw_indicator(joypad_state.right, dpad_center_x + pad_step, dpad_center_y);
 
+    // Use DPAD_AREA_WIDTH constant directly
     let action_start_x = DPAD_AREA_WIDTH as i32 + PADDING as i32;
     let action_y1 = 0;
     let action_y2 = pad_step;
 
+    // Draw Action buttons relative to target_x, target_y
     draw_indicator(joypad_state.b, action_start_x, action_y1);
     draw_indicator(joypad_state.a, action_start_x + pad_step, action_y1);
     draw_indicator(joypad_state.select, action_start_x, action_y2);
     draw_indicator(joypad_state.start, action_start_x + pad_step, action_y2);
 }
 
-/// Draws the disassembly debug view.
-/// Assumes `cpu.disassemble_instruction(addr, bus)` exists and is public.
+
 fn draw_disassembly_debug(
     canvas: &mut Canvas<Window>,
     texture_creator: &TextureCreator<WindowContext>,
@@ -196,89 +195,66 @@ fn draw_disassembly_debug(
     target_y: i32,
     lines_before: usize,
     lines_after: usize,
+    // Pass calculated dimensions
+    area_width: u32,
+    area_height: u32,
 ) -> Result<(), String> {
     // Draw a background rectangle for the disassembly area
     canvas.set_draw_color(DEBUG_BACKGROUND_COLOR);
-    let bg_rect = Rect::new(target_x, target_y, DISASM_AREA_WIDTH, DISASM_AREA_HEIGHT);
+    // Use the passed dimensions
+    let bg_rect = Rect::new(target_x, target_y, area_width, area_height);
     canvas.fill_rect(bg_rect).map_err(|e| e.to_string())?;
-
 
     let current_pc = cpu.pc;
     let total_lines = lines_before + 1 + lines_after;
     let mut instructions: Vec<(u16, String)> = Vec::with_capacity(total_lines);
 
     // --- Disassemble Forwards (including PC) ---
-    let mut current_addr = current_pc; // Start disassembling from PC
+    let mut current_addr = current_pc;
     for _ in 0..=lines_after {
-        // *** This relies on the public disassemble_instruction method ***
-        // *** Ensure MemoryBus provides necessary read access for disassembly ***
         let (disasm_text, instr_len) = cpu.disassemble_instruction(current_addr, bus);
         instructions.push((current_addr, disasm_text));
-        // Advance address, handling potential overflow (though unlikely in practice here)
         current_addr = current_addr.wrapping_add(instr_len as u16);
-        if instr_len == 0 { break; } // Avoid infinite loop if disassembler returns 0 len
+        if instr_len == 0 { break; }
     }
 
     // --- Disassemble Backwards (Approximate) ---
-    // This is tricky because instruction lengths vary. We find the PC line
-    // and try to render `lines_before` lines before it.
-    // A more robust way would involve iterating forward from an earlier address,
-    // but this simpler approach works visually for many cases.
     let mut start_addr = current_pc;
     for _ in 0..lines_before {
-        // Estimate previous instruction was 1-3 bytes back. Try 3 bytes back first.
         let mut found_prev = false;
-        for offset_guess in (1..=3).rev() { // Try 3, 2, 1 bytes back
+        for offset_guess in (1..=3).rev() {
             let prev_addr_guess = start_addr.wrapping_sub(offset_guess);
-            // Check if disassembling from guess lands us back at start_addr
             let (_, len_guess) = cpu.disassemble_instruction(prev_addr_guess, bus);
              if len_guess == (offset_guess as u8) {
-                 // Found a likely previous instruction boundary
                  start_addr = prev_addr_guess;
                  let (disasm_text, _) = cpu.disassemble_instruction(start_addr, bus);
-                 // Prepend to our list
                  instructions.insert(0, (start_addr, disasm_text));
                  found_prev = true;
                  break;
              }
         }
-         if !found_prev {
-             // Couldn't reliably step back, stop trying
-             break;
-         }
+         if !found_prev { break; }
     }
 
     // --- Render the collected lines ---
     let mut current_y = target_y;
-    // Find the index of the PC instruction in our potentially adjusted list
     let pc_index_maybe = instructions.iter().position(|(addr, _)| *addr == current_pc);
-
     let num_lines_to_render = lines_before + 1 + lines_after;
     let mut rendered_count = 0;
 
-    // Determine the starting index for rendering
     let start_render_idx = if let Some(pc_index) = pc_index_maybe {
         pc_index.saturating_sub(lines_before)
-    } else {
-        // If PC wasn't found (maybe edge case during backwards search?),
-        // try to render from beginning up to max lines.
-        0
-    };
+    } else { 0 };
 
 
-    for (idx, (addr, text)) in instructions.iter().enumerate().skip(start_render_idx) {
-        if rendered_count >= num_lines_to_render {
-            break;
-        }
+    for (_idx, (addr, text)) in instructions.iter().enumerate().skip(start_render_idx) {
+        if rendered_count >= num_lines_to_render { break; }
 
         let display_text = format!("{:04X}: {}", addr, text);
-        let color = if *addr == current_pc {
-            DEBUG_PC_COLOR
-        } else {
-            DEBUG_TEXT_COLOR
-        };
+        let color = if *addr == current_pc { DEBUG_PC_COLOR } else { DEBUG_TEXT_COLOR };
 
-        render_text(canvas, texture_creator, font, &display_text, target_x + 5, current_y, color)?; // Add small X padding
+        // Use DISASM_LINE_HEIGHT constant for Y increment
+        render_text(canvas, texture_creator, font, &display_text, target_x + 5, current_y, color)?;
 
         current_y += DISASM_LINE_HEIGHT as i32;
         rendered_count += 1;
@@ -301,7 +277,6 @@ pub fn main() -> Result<(), String> {
     println!("Initializing SDL2...");
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
-    // TODO: Initialize SDL Audio Subsystem if generating sound
 
     // --- TTF Initialization ---
     println!("Initializing SDL2_ttf...");
@@ -320,13 +295,28 @@ pub fn main() -> Result<(), String> {
 
     let window_title = format!("Rust GB Emu - {}", rom_path.file_name().unwrap_or_default().to_string_lossy());
 
-    // --- Calculate Window Dimensions at Runtime ---
+    // --- Runtime Layout Calculation ---
+    // Calculate dimensions that required cmp::max here using 'let'
+    let input_debug_area_width: u32 = DPAD_AREA_WIDTH + PADDING + ACTION_AREA_WIDTH;
     let input_debug_area_height: u32 = cmp::max(DPAD_AREA_HEIGHT, ACTION_AREA_HEIGHT);
-    let mid_pane_height = VRAM_VIEW_HEIGHT + PADDING + input_debug_area_height;
-    let right_pane_height = mid_pane_height + PADDING + DISASM_AREA_HEIGHT;
-    let right_pane_width = cmp::max(cmp::max(VRAM_VIEW_WIDTH, INPUT_DEBUG_AREA_WIDTH), DISASM_AREA_WIDTH);
-    let total_window_height: u32 = cmp::max(GB_SCREEN_HEIGHT, right_pane_height);
-    let total_window_width: u32 = GB_SCREEN_WIDTH + PADDING + right_pane_width;
+
+    // Define the widths of the three main columns using constants
+    let col1_width = GB_SCREEN_WIDTH;
+    let col2_width = DISASM_AREA_WIDTH; // Use constant directly
+    let col3_width = cmp::max(VRAM_VIEW_WIDTH, input_debug_area_width); // Use calculated width
+
+    // Calculate total window width based on the three columns and padding
+    let total_window_width: u32 = col1_width + PADDING + col2_width + PADDING + col3_width;
+
+    // Calculate the heights needed for each column using constants and calculated values
+    let col1_height = GB_SCREEN_HEIGHT;
+    let col2_height = DISASM_AREA_HEIGHT; // Use constant directly
+    let col3_height = VRAM_VIEW_HEIGHT + PADDING + input_debug_area_height; // Use calculated height
+
+    // Total window height is the maximum height required by any column
+    let total_window_height: u32 = cmp::max(col1_height, cmp::max(col2_height, col3_height));
+    // --- End Runtime Layout Calculation ---
+
 
     println!("Creating window ({}x{})...", total_window_width, total_window_height);
     let window = video_subsystem
@@ -348,22 +338,18 @@ pub fn main() -> Result<(), String> {
     // --- Emulator Initialization ---
     println!("Initializing APU...");
     let apu = Apu::new();
-    // *** Modify MemoryBus::new to accept APU if needed ***
-    // let apu_ref = Rc::new(RefCell::new(apu));
-    // let mut memory_bus = MemoryBus::new(apu_ref.clone());
     println!("Initializing memory bus...");
-    let mut memory_bus = MemoryBus::new(); // <-- Placeholder - MUST BE MODIFIED if APU is integrated via bus
+    let mut memory_bus = MemoryBus::new(); // Modify if APU integrated via bus
 
     println!("Loading ROM: {}", rom_path.display());
     match std::fs::read(rom_path) {
-        Ok(rom_data) => { // Use a block to print size before borrow/move
+        Ok(rom_data) => {
             let rom_size = rom_data.len();
             memory_bus.load_rom(&rom_data);
-            println!("ROM loaded successfully ({} bytes)", rom_size); // Moved success message here
+            println!("ROM loaded successfully ({} bytes)", rom_size);
         }
         Err(e) => return Err(format!("Failed to load ROM '{}': {}", rom_path.display(), e)),
     }
-    println!("ROM loaded successfully.");
 
     let skip_boot_rom = true;
     println!("Initializing CPU (skip_boot_rom={})...", skip_boot_rom);
@@ -376,8 +362,7 @@ pub fn main() -> Result<(), String> {
 
     println!("Initializing PPU...");
     let mut ppu = Ppu::new();
-    // Make APU mutable if owned by main loop
-    let mut apu = apu;
+    let mut apu = apu; // Make APU mutable if needed
 
     println!("Starting main loop...");
     'main_loop: loop {
@@ -399,29 +384,20 @@ pub fn main() -> Result<(), String> {
         // --- 2. Emulate One Frame ---
         let mut cycles_this_frame: u32 = 0;
         while cycles_this_frame < CYCLES_PER_FRAME {
-            // *** Handle Result from cpu.step ***
             let step_result = cpu.step(&mut memory_bus);
-
             match step_result {
                 Ok(executed_cycles_u8) => {
                     let executed_cycles = executed_cycles_u8 as u32;
                     ppu.step(executed_cycles, &mut memory_bus);
                     apu.step(executed_cycles, &mut memory_bus);
-                    // TODO: Step Timer
                     cycles_this_frame += executed_cycles;
-                    // Check interrupts here or within cpu.step logic
                 }
                 Err(error_message) => {
-                    // CPU encountered an error (e.g., unknown opcode)
                     eprintln!("\n==================== CPU Error ====================");
                     eprintln!("Emulator halted due to CPU error:");
                     eprintln!(" -> {}", error_message);
                     eprintln!("====================================================\n");
-
-                    // Optionally, print CPU state here for debugging
-                    // println!("CPU State at Error:\n{:?}", cpu);
-
-                    break 'main_loop; // Stop the emulator
+                    break 'main_loop;
                 }
             }
         }
@@ -433,24 +409,38 @@ pub fn main() -> Result<(), String> {
         canvas.set_draw_color(Color::RGB(20, 20, 20));
         canvas.clear();
 
-        draw_gb_screen(&mut canvas, ppu.get_frame_buffer(), 0, 0);
+        // --- Use Constants and Calculated Values for Drawing Coordinates ---
+        // Column 1: GB Screen
+        let gb_screen_x = 0;
+        let gb_screen_y = 0;
+        draw_gb_screen(&mut canvas, ppu.get_frame_buffer(), gb_screen_x, gb_screen_y);
 
-        let right_pane_x = (GB_SCREEN_WIDTH + PADDING) as i32;
-        let vram_view_y = 0;
-        draw_vram_debug(&mut canvas, ppu.get_vram_debug_buffer(), right_pane_x, vram_view_y);
-
-        let input_view_y = vram_view_y + VRAM_VIEW_HEIGHT as i32 + PADDING as i32;
-        draw_input_debug(&mut canvas, &memory_bus.joypad, right_pane_x, input_view_y);
-
-        let input_debug_area_height: u32 = cmp::max(DPAD_AREA_HEIGHT, ACTION_AREA_HEIGHT); // Recalculate here for clarity
-        let disasm_view_y = input_view_y + input_debug_area_height as i32 + PADDING as i32;
+        // Column 2: Disassembly
+        let disasm_pane_x = (GB_SCREEN_WIDTH + PADDING) as i32;
+        let disasm_pane_y = 0; // Align to top
         if let Err(e) = draw_disassembly_debug(
             &mut canvas, &texture_creator, &font, &cpu, &memory_bus,
-            right_pane_x, disasm_view_y, DISASM_LINES_BEFORE, DISASM_LINES_AFTER,
+            disasm_pane_x, disasm_pane_y, DISASM_LINES_BEFORE, DISASM_LINES_AFTER,
+            DISASM_AREA_WIDTH, // Pass constant width
+            DISASM_AREA_HEIGHT // Pass constant height
         ) {
             eprintln!("Error drawing disassembly: {}", e);
-            // break 'main_loop; // Optional: Stop on drawing error
         }
+
+        // Column 3: VRAM and Input
+        // Use the constant DISASM_AREA_WIDTH here
+        let far_right_pane_x = disasm_pane_x + DISASM_AREA_WIDTH as i32 + PADDING as i32;
+
+        // VRAM View (top of column 3) - Use VRAM constants
+        let vram_view_y = 0; // Align to top
+        draw_vram_debug(&mut canvas, ppu.get_vram_debug_buffer(), far_right_pane_x, vram_view_y);
+
+        // Input View (below VRAM view in column 3)
+        // Use VRAM_VIEW_HEIGHT constant and the calculated input_debug_area_height
+        let input_view_y = vram_view_y + VRAM_VIEW_HEIGHT as i32 + PADDING as i32;
+        draw_input_debug(&mut canvas, &memory_bus.joypad, far_right_pane_x, input_view_y);
+        // --- End Drawing Coordinates ---
+
 
         canvas.present();
 
@@ -465,8 +455,6 @@ pub fn main() -> Result<(), String> {
                 thread::yield_now();
             }
         }
-        // Optional: else { eprintln!("Warning: Frame took too long: {:?}", elapsed_time); }
-
     } // End 'main_loop
 
     println!("Emulator stopped.");

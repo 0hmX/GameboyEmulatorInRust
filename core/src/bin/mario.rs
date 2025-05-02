@@ -14,11 +14,14 @@ use std::thread;
 use std::env;
 use std::path::Path;
 use std::cmp;
+use std::cell::RefCell; // Needed for shared mutable access if MemoryBus holds APU
+use std::rc::Rc;        // Needed for shared mutable access if MemoryBus holds APU
 
 // --- Emulator Core Imports ---
 use gameboy_emulator::memory_bus::{MemoryBus, JoypadState};
 use gameboy_emulator::cpu::Cpu;
 use gameboy_emulator::ppu::{Ppu, VRAM_DEBUG_WIDTH, VRAM_DEBUG_HEIGHT};
+use gameboy_emulator::apu::Apu; 
 
 // --- Timing Constants ---
 const TARGET_FPS: u32 = 60;
@@ -201,12 +204,13 @@ fn draw_disassembly_debug(
 
     let current_pc = cpu.pc;
     let total_lines = lines_before + 1 + lines_after;
-    let mut current_addr = current_pc;
     let mut instructions: Vec<(u16, String)> = Vec::with_capacity(total_lines);
 
     // --- Disassemble Forwards (including PC) ---
+    let mut current_addr = current_pc; // Start disassembling from PC
     for _ in 0..=lines_after {
         // *** This relies on the public disassemble_instruction method ***
+        // *** Ensure MemoryBus provides necessary read access for disassembly ***
         let (disasm_text, instr_len) = cpu.disassemble_instruction(current_addr, bus);
         instructions.push((current_addr, disasm_text));
         // Advance address, handling potential overflow (though unlikely in practice here)
@@ -255,7 +259,9 @@ fn draw_disassembly_debug(
     let start_render_idx = if let Some(pc_index) = pc_index_maybe {
         pc_index.saturating_sub(lines_before)
     } else {
-        0 // PC not found? Render from the beginning
+        // If PC wasn't found (maybe edge case during backwards search?),
+        // try to render from beginning up to max lines.
+        0
     };
 
 
@@ -295,6 +301,7 @@ pub fn main() -> Result<(), String> {
     println!("Initializing SDL2...");
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
+    // TODO: Initialize SDL Audio Subsystem if generating sound
 
     // --- TTF Initialization ---
     println!("Initializing SDL2_ttf...");
@@ -316,6 +323,7 @@ pub fn main() -> Result<(), String> {
     // --- Calculate Window Dimensions at Runtime ---
     let input_debug_area_height: u32 = cmp::max(DPAD_AREA_HEIGHT, ACTION_AREA_HEIGHT);
     let mid_pane_height = VRAM_VIEW_HEIGHT + PADDING + input_debug_area_height;
+    // Adjust right pane height calculation if adding more debug views later
     let right_pane_height = mid_pane_height + PADDING + DISASM_AREA_HEIGHT;
     let right_pane_width = cmp::max(cmp::max(VRAM_VIEW_WIDTH, INPUT_DEBUG_AREA_WIDTH), DISASM_AREA_WIDTH);
 
@@ -343,8 +351,16 @@ pub fn main() -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
 
     // --- Emulator Initialization ---
+    println!("Initializing APU...");
+    let apu = Apu::new(); // <-- Initialize APU
+    // Wrap APU in Rc<RefCell> if MemoryBus needs shared mutable access
+    // let apu_ref = Rc::new(RefCell::new(apu));
+
     println!("Initializing memory bus...");
-    let mut memory_bus = MemoryBus::new();
+    // *** CRITICAL: Modify your MemoryBus::new() or add a method ***
+    // *** to accept the APU (likely as Rc<RefCell<Apu>>)      ***
+    // Example: let mut memory_bus = MemoryBus::new(apu_ref.clone());
+    let mut memory_bus = MemoryBus::new(); // <-- Placeholder - MUST BE MODIFIED
 
     println!("Loading ROM: {}", rom_path.display());
     match std::fs::read(rom_path) {
@@ -371,6 +387,11 @@ pub fn main() -> Result<(), String> {
     println!("Initializing PPU...");
     let mut ppu = Ppu::new();
 
+    // Re-declare APU as mutable here to pass to step function
+    // This assumes APU state is managed within the main loop,
+    // If MemoryBus holds the Rc<RefCell>, this isn't needed here.
+    let mut apu = apu; // If not using Rc<RefCell> approach
+
     // --- Main Emulator Loop ---
     println!("Starting main loop...");
     'main_loop: loop {
@@ -396,16 +417,19 @@ pub fn main() -> Result<(), String> {
         // --- 2. Emulate One Frame ---
         let mut cycles_this_frame: u32 = 0;
         while cycles_this_frame < CYCLES_PER_FRAME {
+            // Pass mutable references as needed
             let executed_cycles = cpu.step(&mut memory_bus) as u32;
             ppu.step(executed_cycles, &mut memory_bus);
+            // *** Step the APU ***
+            apu.step(executed_cycles, &mut memory_bus); // <-- Call APU step
             // TODO: Step Timer
-            // TODO: Step APU
             cycles_this_frame += executed_cycles;
-            // Check for interrupts (should be handled within cpu.step or after)
+            // Interrupt handling is likely within cpu.step or needs checking after steps
         }
 
         // --- 3. Update Debug Views ---
         ppu.render_vram_debug(&memory_bus);
+        // TODO: Add APU debug visualization if desired
 
         // --- 4. Drawing ---
         canvas.set_draw_color(Color::RGB(20, 20, 20)); // Background
@@ -453,11 +477,16 @@ pub fn main() -> Result<(), String> {
         if elapsed_time < TARGET_FRAME_DURATION {
             let sleep_duration = TARGET_FRAME_DURATION.saturating_sub(elapsed_time);
             if sleep_duration > Duration::from_millis(1) {
+                // Sleep for most of the duration, but leave a millisecond for yield loop
                 thread::sleep(sleep_duration.saturating_sub(Duration::from_millis(1)));
             }
+            // Busy-wait loop for the final moments to improve accuracy
             while Instant::now() < frame_start_time + TARGET_FRAME_DURATION {
-                thread::yield_now();
+                thread::yield_now(); // Yield to prevent pegging CPU core
             }
+        } else {
+            // Optional: Log if frame took too long
+            // eprintln!("Warning: Frame took longer than target: {:?}", elapsed_time);
         }
     } // --- End of main_loop ---
 

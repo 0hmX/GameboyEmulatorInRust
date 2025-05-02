@@ -1,6 +1,6 @@
 use crate::cpu::{Cpu, CpuResult};
 use crate::memory_bus::MemoryBus;
-use lazy_static::lazy_static; // Add lazy_static = "1.4.0" to Cargo.toml
+use lazy_static::lazy_static;
 
 // Definition from your previous code block
 #[derive(Clone)]

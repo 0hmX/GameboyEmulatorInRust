@@ -3,3 +3,7 @@ pub mod cpu;
 pub mod instruction;
 pub mod memory_bus;
 pub mod ppu;
+pub mod joypad;
+pub mod mbc;
+pub mod rtc;
+pub mod memory_map;

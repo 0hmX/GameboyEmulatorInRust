@@ -1,10 +1,17 @@
 [package]
-name = "gameboy_emulator"
+name = "boba"
 version = "0.1.0"
 edition = "2024"
-
 
 [dependencies]
 sdl2 = { version = "0.36", features = ["ttf"] }
 lazy_static = "1.4.0"
 log = "0.4"
+
+[lib]
+name = "boba"
+path = "src/lib.rs"
+
+[[bin]]
+name = "boba_app"
+path = "src/app/main.rs"

@@ -45,6 +45,8 @@ pub    ime_scheduled: bool, // Should IME be enabled after the next instruction?
 pub    total_cycles: u64 // For tracking total cycles executed (useful for timing)
 }
 
+pub type CpuResult<T> = Result<T, String>;
+
 // No longer needs lifetime 'a
 impl Cpu {
     /// Creates a new CPU instance.
@@ -96,56 +98,84 @@ impl Cpu {
     /// Executes a single CPU step: handles interrupts, then fetches and executes an instruction.
     /// Returns the number of **T-cycles** (clock cycles) consumed in this step.
     /// Requires mutable access to the MemoryBus.
-    pub fn step(&mut self, memory_bus: &mut MemoryBus) -> u8 {
+    pub fn step(&mut self, memory_bus: &mut MemoryBus) -> CpuResult<u16> { // Changed return type
         // --- Handle pending EI instruction ---
+        // This needs to happen *before* interrupt check, as EI enables interrupts
+        // *after* the instruction following it.
+        let mut ime_just_enabled = false;
         if self.ime_scheduled {
             self.ime = true;
             self.ime_scheduled = false;
+            ime_just_enabled = true; // Mark that IME was just set this step
         }
 
         // --- Check for and Handle Interrupts ---
-        let interrupt_cycles = self.handle_interrupts(memory_bus);
+        // Only handle interrupts if IME is enabled *unless* IME was just enabled by EI this step
+        let interrupt_cycles = if self.ime && !ime_just_enabled {
+            self.handle_interrupts(memory_bus) // Assuming handle_interrupts returns u8
+        } else {
+           0
+        };
+
         if interrupt_cycles > 0 {
-            self.halted = false; // Wake up if halted
-            self.stop_requested = false; // Wake up if stopped
+            self.halted = false; // Interrupts wake the CPU
+            self.stop_requested = false; // Interrupts likely wake from STOP too (verify behavior)
             self.total_cycles += interrupt_cycles as u64;
-            return interrupt_cycles;
+            return Ok(interrupt_cycles as u16); // Cast cycles to u16
         }
 
         // --- Handle HALT/STOP state ---
+        // If halted or stopped and no interrupt was serviced, just burn cycles
         if self.halted || self.stop_requested {
              self.total_cycles += 4;
-             return 4; // Consume 1 M-cycle (4 T-cycles)
+             return Ok(4); // Consume 1 M-cycle (4 T-cycles)
         }
 
         // --- Fetch ---
-        // Need to handle potential HALT bug: If HALT bug occurs, PC doesn't increment.
-        // Read the instruction *before* checking the halt bug condition for PC handling.
-        let opcode_pc = self.pc; // Store PC before fetch for potential halt bug
-        let opcode = self.fetch_byte(memory_bus);
+        // Need to handle potential HALT bug: If HALT bug occurs, PC doesn't increment *after* fetch.
+        let opcode_pc = self.pc; // Store PC *before* fetch for potential halt bug rewind
+        let opcode = self.fetch_byte(memory_bus); // Reads byte at PC and increments PC
 
         // Check for HALT bug *after* fetching opcode but *before* executing
+        // The bug occurs if HALT is executed when IME=0 but (IE & IF) != 0
+        // Let's assume the check is done when entering HALT state, not every step.
+        // If `self.halted` implies the bug check was already done upon entering HALT,
+        // we don't strictly need this check here unless re-evaluating every cycle.
+        // However, if the check is needed *during* HALT:
+        /*
         let ie = memory_bus.read_byte(IE_REGISTER);
         let iflags = memory_bus.read_byte(IF_REGISTER);
-        let halt_bug_condition = self.halted && !self.ime && (ie & iflags & 0x1F) != 0; // Check only enabled+flagged interrupts
+        // Note: Original code checked self.halted *and* !self.ime. If halted, IME is usually 0 anyway.
+        let halt_bug_condition = self.halted && (ie & iflags & 0x1F) != 0;
 
         if halt_bug_condition {
-            // HALT bug: PC does not increment for the fetched opcode byte.
+            // HALT bug: PC should not have incremented during the fetch. Rewind it.
             self.pc = opcode_pc;
-            // The instruction fetched (opcode) will be executed anyway in the next step if still halted.
-            // The 'halted' state remains true until an actual interrupt service routine begins.
-             println!("WARN: HALT bug triggered! PC kept at {:04X}", self.pc);
-             // Fall through to execute NOP-like behaviour (just cycle counting)
-             self.total_cycles += 4; // Consume cycles for the "skipped" instruction fetch/decode
-             return 4;
+            println!("WARN: HALT bug active! PC rewound to {:04X}", self.pc);
+            // Consume cycles for the effectively skipped execution phase
+            self.total_cycles += 4;
+            return Ok(4);
         }
-
+        */
+        // Simplification: Assuming HALT bug PC handling is managed elsewhere or not needed every step.
 
         // --- Decode & Execute ---
-        let instruction_cycles = self.execute(opcode, memory_bus);
-        self.total_cycles += instruction_cycles as u64;
+        // Call the execute method which now returns Result<u16, String>
+        let execute_result = self.execute(opcode, memory_bus);
 
-        instruction_cycles
+        // --- Process Execution Result ---
+        match execute_result {
+            Ok(instruction_cycles) => {
+                self.total_cycles += instruction_cycles as u64;
+                Ok(instruction_cycles as u16)
+            }
+            Err(error_message) => {
+                // Execution failed (e.g., unknown opcode), return the error
+                // Optionally add more context here if needed
+                Err(format!("CPU execution error: {} (Opcode: {:#04X} at {:#06X})",
+                    error_message, opcode, opcode_pc))
+            }
+        }
     }
 
 
@@ -316,7 +346,7 @@ impl Cpu {
     }
 
     // Fetches immediate byte
-    fn add_sp_i8(&mut self, memory_bus: &mut MemoryBus) {
+    fn add_sp_i8(&mut self, memory_bus: &mut MemoryBus) -> u8 {
         let offset = self.fetch_byte(memory_bus) as i8;
         let value = offset as i16 as u16;
         let sp = self.sp;
@@ -329,10 +359,12 @@ impl Cpu {
         self.set_flag(FLAG_Z | FLAG_N, false);
         self.set_flag(FLAG_H, half_carry);
         self.set_flag(FLAG_C, carry);
+
+        16
     }
 
      // Fetches immediate byte
-     fn ld_hl_sp_i8(&mut self, memory_bus: &mut MemoryBus) {
+     fn ld_hl_sp_i8(&mut self, memory_bus: &mut MemoryBus) -> u8 {
         let offset = self.fetch_byte(memory_bus) as i8;
         let value = offset as i16 as u16;
         let sp = self.sp;
@@ -345,165 +377,162 @@ impl Cpu {
         self.set_flag(FLAG_Z | FLAG_N, false);
         self.set_flag(FLAG_H, half_carry);
         self.set_flag(FLAG_C, carry);
+        
+        16
     }
 
-    /// Decodes and executes a fetched opcode.
-    /// Returns the number of T-cycles the instruction took.
-    fn execute(&mut self, opcode: u8, memory_bus: &mut MemoryBus) -> u8 {
+    fn execute(&mut self, opcode: u8, memory_bus: &mut MemoryBus) -> CpuResult<u8> {
+        let instruction_pc = self.pc.wrapping_sub(1); // pc is usually advanced by fetch
+
         match opcode {
             // NOP
-            0x00 => 4,
+            0x00 => Ok(4),
 
             // LD BC, d16
-            0x01 => { let value = self.fetch_word(memory_bus); self.set_bc(value); 12 }
+            0x01 => { let value = self.fetch_word(memory_bus); self.set_bc(value); Ok(12) }
             // LD (BC), A
-            0x02 => { memory_bus.write_byte(self.get_bc(), self.a); 8 },
+            0x02 => { memory_bus.write_byte(self.get_bc(), self.a); Ok(8) },
             // INC BC
-            0x03 => { self.set_bc(self.get_bc().wrapping_add(1)); 8 },
+            0x03 => { self.set_bc(self.get_bc().wrapping_add(1)); Ok(8) },
             // INC B
-            0x04 => { self.b = self.inc_u8(self.b); 4 },
+            0x04 => { self.b = self.inc_u8(self.b); Ok(4) },
             // DEC B
-            0x05 => { self.b = self.dec_u8(self.b); 4 },
+            0x05 => { self.b = self.dec_u8(self.b); Ok(4) },
              // LD B, d8
-             0x06 => { self.b = self.fetch_byte(memory_bus); 8 },
+             0x06 => { self.b = self.fetch_byte(memory_bus); Ok(8) },
             // RLCA
-            0x07 => { self.a = self.rlc(self.a); self.set_flag(FLAG_Z, false); 4 },
+            0x07 => { self.a = self.rlc(self.a); self.set_flag(FLAG_Z, false); Ok(4) },
 
             // LD (a16), SP
             0x08 => {
                  let addr = self.fetch_word(memory_bus);
-                 // Write low byte first, then high byte for SP store
                  memory_bus.write_byte(addr, (self.sp & 0xFF) as u8);
                  memory_bus.write_byte(addr.wrapping_add(1), (self.sp >> 8) as u8);
-                 20
+                 Ok(20)
              },
             // ADD HL, BC
-            0x09 => { let val = self.get_bc(); self.add_hl(val); 8 },
+            0x09 => { let val = self.get_bc(); self.add_hl(val); Ok(8) },
              // LD A, (BC)
-             0x0A => { self.a = memory_bus.read_byte(self.get_bc()); 8 },
+             0x0A => { self.a = memory_bus.read_byte(self.get_bc()); Ok(8) },
              // DEC BC
-             0x0B => { self.set_bc(self.get_bc().wrapping_sub(1)); 8 },
+             0x0B => { self.set_bc(self.get_bc().wrapping_sub(1)); Ok(8) },
              // INC C
-             0x0C => { self.c = self.inc_u8(self.c); 4 },
+             0x0C => { self.c = self.inc_u8(self.c); Ok(4) },
              // DEC C
-             0x0D => { self.c = self.dec_u8(self.c); 4 },
+             0x0D => { self.c = self.dec_u8(self.c); Ok(4) },
              // LD C, d8
-             0x0E => { self.c = self.fetch_byte(memory_bus); 8 },
+             0x0E => { self.c = self.fetch_byte(memory_bus); Ok(8) },
             // RRCA
-            0x0F => { self.a = self.rrc(self.a); self.set_flag(FLAG_Z, false); 4 },
+            0x0F => { self.a = self.rrc(self.a); self.set_flag(FLAG_Z, false); Ok(4) },
 
 
             // STOP
             0x10 => {
-                 // STOP consumes the next byte (usually 0x00) but does nothing with it
-                 // fetch_byte handles the PC increment
                  let _ = self.fetch_byte(memory_bus); // Consume the 0x00
-                 // TODO: Handle CGB speed switching if applicable.
                  self.stop_requested = true;
-                 // Actual low power mode isn't simulated, just stops fetching.
-                 4 // STOP instruction itself takes 4 cycles
+                 Ok(4)
              },
             // LD DE, d16
-            0x11 => { let value = self.fetch_word(memory_bus); self.set_de(value); 12 },
+            0x11 => { let value = self.fetch_word(memory_bus); self.set_de(value); Ok(12) },
              // LD (DE), A
-             0x12 => { memory_bus.write_byte(self.get_de(), self.a); 8 },
+             0x12 => { memory_bus.write_byte(self.get_de(), self.a); Ok(8) },
              // INC DE
-             0x13 => { self.set_de(self.get_de().wrapping_add(1)); 8 },
+             0x13 => { self.set_de(self.get_de().wrapping_add(1)); Ok(8) },
             // INC D
-            0x14 => { self.d = self.inc_u8(self.d); 4 },
+            0x14 => { self.d = self.inc_u8(self.d); Ok(4) },
             // DEC D
-            0x15 => { self.d = self.dec_u8(self.d); 4 },
+            0x15 => { self.d = self.dec_u8(self.d); Ok(4) },
              // LD D, d8
-             0x16 => { self.d = self.fetch_byte(memory_bus); 8 },
+             0x16 => { self.d = self.fetch_byte(memory_bus); Ok(8) },
             // RLA
-            0x17 => { self.a = self.rl(self.a); self.set_flag(FLAG_Z, false); 4 },
+            0x17 => { self.a = self.rl(self.a); self.set_flag(FLAG_Z, false); Ok(4) },
 
             // JR r8
-            0x18 => self.jr_cc(true, memory_bus),
+            0x18 => Ok(self.jr_cc(true, memory_bus)), // Assuming jr_cc returns cycles directly
             // ADD HL, DE
-            0x19 => { let val = self.get_de(); self.add_hl(val); 8 },
+            0x19 => { let val = self.get_de(); self.add_hl(val); Ok(8) },
              // LD A, (DE)
-             0x1A => { self.a = memory_bus.read_byte(self.get_de()); 8 },
+             0x1A => { self.a = memory_bus.read_byte(self.get_de()); Ok(8) },
              // DEC DE
-             0x1B => { self.set_de(self.get_de().wrapping_sub(1)); 8 },
+             0x1B => { self.set_de(self.get_de().wrapping_sub(1)); Ok(8) },
             // INC E
-            0x1C => { self.e = self.inc_u8(self.e); 4 },
+            0x1C => { self.e = self.inc_u8(self.e); Ok(4) },
             // DEC E
-            0x1D => { self.e = self.dec_u8(self.e); 4 },
+            0x1D => { self.e = self.dec_u8(self.e); Ok(4) },
             // LD E, d8
-            0x1E => { self.e = self.fetch_byte(memory_bus); 8 },
+            0x1E => { self.e = self.fetch_byte(memory_bus); Ok(8) },
             // RRA
-            0x1F => { self.a = self.rr(self.a); self.set_flag(FLAG_Z, false); 4 },
+            0x1F => { self.a = self.rr(self.a); self.set_flag(FLAG_Z, false); Ok(4) },
 
 
             // JR NZ, r8
-            0x20 => self.jr_cc(!self.get_flag(FLAG_Z), memory_bus),
+            0x20 => Ok(self.jr_cc(!self.get_flag(FLAG_Z), memory_bus)),
             // LD HL, d16
-            0x21 => { let val = self.fetch_word(memory_bus); self.set_hl(val); 12 },
+            0x21 => { let val = self.fetch_word(memory_bus); self.set_hl(val); Ok(12) },
             // LD (HL+), A
             0x22 => {
                  let addr = self.get_hl();
                  memory_bus.write_byte(addr, self.a);
                  self.set_hl(addr.wrapping_add(1));
-                 8
+                 Ok(8)
             },
             // INC HL
-            0x23 => { self.set_hl(self.get_hl().wrapping_add(1)); 8 },
+            0x23 => { self.set_hl(self.get_hl().wrapping_add(1)); Ok(8) },
              // INC H
-             0x24 => { self.h = self.inc_u8(self.h); 4 },
+             0x24 => { self.h = self.inc_u8(self.h); Ok(4) },
              // DEC H
-             0x25 => { self.h = self.dec_u8(self.h); 4 },
+             0x25 => { self.h = self.dec_u8(self.h); Ok(4) },
              // LD H, d8
-             0x26 => { self.h = self.fetch_byte(memory_bus); 8 },
+             0x26 => { self.h = self.fetch_byte(memory_bus); Ok(8) },
             // DAA
-            0x27 => { self.daa(); 4 },
+            0x27 => { self.daa(); Ok(4) },
 
             // JR Z, r8
-            0x28 => self.jr_cc(self.get_flag(FLAG_Z), memory_bus),
+            0x28 => Ok(self.jr_cc(self.get_flag(FLAG_Z), memory_bus)),
             // ADD HL, HL
-            0x29 => { let val = self.get_hl(); self.add_hl(val); 8 },
+            0x29 => { let val = self.get_hl(); self.add_hl(val); Ok(8) },
             // LD A, (HL+)
             0x2A => {
                  let addr = self.get_hl();
                  self.a = memory_bus.read_byte(addr);
                  self.set_hl(addr.wrapping_add(1));
-                 8
+                 Ok(8)
              },
             // DEC HL
-            0x2B => { self.set_hl(self.get_hl().wrapping_sub(1)); 8 },
+            0x2B => { self.set_hl(self.get_hl().wrapping_sub(1)); Ok(8) },
              // INC L
-             0x2C => { self.l = self.inc_u8(self.l); 4 },
+             0x2C => { self.l = self.inc_u8(self.l); Ok(4) },
              // DEC L
-             0x2D => { self.l = self.dec_u8(self.l); 4 },
+             0x2D => { self.l = self.dec_u8(self.l); Ok(4) },
              // LD L, d8
-             0x2E => { self.l = self.fetch_byte(memory_bus); 8 },
+             0x2E => { self.l = self.fetch_byte(memory_bus); Ok(8) },
             // CPL
             0x2F => {
                 self.a = !self.a;
                 self.set_flag(FLAG_N | FLAG_H, true);
-                4
+                Ok(4)
             },
 
             // JR NC, r8
-            0x30 => self.jr_cc(!self.get_flag(FLAG_C), memory_bus),
+            0x30 => Ok(self.jr_cc(!self.get_flag(FLAG_C), memory_bus)),
             // LD SP, d16
-            0x31 => { self.sp = self.fetch_word(memory_bus); 12 },
+            0x31 => { self.sp = self.fetch_word(memory_bus); Ok(12) },
              // LD (HL-), A
              0x32 => {
                  let addr = self.get_hl();
                  memory_bus.write_byte(addr, self.a);
                  self.set_hl(addr.wrapping_sub(1));
-                 8
+                 Ok(8)
             },
              // INC SP
-             0x33 => { self.sp = self.sp.wrapping_add(1); 8 },
+             0x33 => { self.sp = self.sp.wrapping_add(1); Ok(8) },
             // INC (HL)
             0x34 => {
                 let addr = self.get_hl();
                 let value = memory_bus.read_byte(addr);
                 let result = self.inc_u8(value);
                 memory_bus.write_byte(addr, result);
-                12
+                Ok(12)
             },
             // DEC (HL)
             0x35 => {
@@ -511,74 +540,60 @@ impl Cpu {
                 let value = memory_bus.read_byte(addr);
                 let result = self.dec_u8(value);
                 memory_bus.write_byte(addr, result);
-                12
+                Ok(12)
             },
             // LD (HL), d8
             0x36 => {
                 let value = self.fetch_byte(memory_bus);
                 memory_bus.write_byte(self.get_hl(), value);
-                12
+                Ok(12)
             },
             // SCF
             0x37 => {
                 self.set_flag(FLAG_N | FLAG_H, false);
                 self.set_flag(FLAG_C, true);
-                4
+                Ok(4)
             },
 
             // JR C, r8
-            0x38 => self.jr_cc(self.get_flag(FLAG_C), memory_bus),
+            0x38 => Ok(self.jr_cc(self.get_flag(FLAG_C), memory_bus)),
             // ADD HL, SP
-            0x39 => { let val = self.sp; self.add_hl(val); 8 },
+            0x39 => { let val = self.sp; self.add_hl(val); Ok(8) },
             // LD A, (HL-)
             0x3A => {
                  let addr = self.get_hl();
                  self.a = memory_bus.read_byte(addr);
                  self.set_hl(addr.wrapping_sub(1));
-                 8
+                 Ok(8)
              },
              // DEC SP
-             0x3B => { self.sp = self.sp.wrapping_sub(1); 8 },
+             0x3B => { self.sp = self.sp.wrapping_sub(1); Ok(8) },
             // INC A
-            0x3C => { self.a = self.inc_u8(self.a); 4 },
+            0x3C => { self.a = self.inc_u8(self.a); Ok(4) },
              // DEC A
-             0x3D => { self.a = self.dec_u8(self.a); 4 },
+             0x3D => { self.a = self.dec_u8(self.a); Ok(4) },
             // LD A, d8
-            0x3E => { self.a = self.fetch_byte(memory_bus); 8 },
+            0x3E => { self.a = self.fetch_byte(memory_bus); Ok(8) },
             // CCF
             0x3F => {
                 let current_c = self.get_flag(FLAG_C);
                 self.set_flag(FLAG_N | FLAG_H, false);
                 self.set_flag(FLAG_C, !current_c);
-                4
+                Ok(4)
             },
 
-             // LD r8, r8' (Includes LD B,B etc. which are 4 cycles)
-             // Also includes LD r, (HL) (8 cycles) and LD (HL), r (8 cycles)
-             // HALT (0x76) is handled separately below.
              0x40..=0x7F => {
                  if opcode == 0x76 {
-                     self.halt(memory_bus) // Pass memory_bus for HALT bug check
+                     Ok(self.halt(memory_bus)) // Assuming halt returns cycles
                  } else {
-                     self.ld_r8_r8(opcode, memory_bus)
+                     Ok(self.ld_r8_r8(opcode, memory_bus)) // Assuming ld_r8_r8 returns cycles
                  }
-                 // Cycles are returned by ld_r8_r8 or halt
              },
 
-             // HALT (Moved check into 0x40..=0x7F range handler)
-             // 0x76 => self.halt(memory_bus), <-- Handled above
-
-             // --- The LD r, (HL) and LD (HL), r cases are handled within ld_r8_r8 ---
-             // 0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E => { ... handled by ld_r8_r8 ... }
-             // 0x70..=0x75 | 0x77 => { ... handled by ld_r8_r8 ... }
-
-
-            // --- ALU Operations: ADD/ADC/SUB/SBC/AND/XOR/OR/CP A, r8|(HL) ---
             0x80..=0xBF => {
-                // Determine operand source and if it's (HL)
                 let operand_code = opcode & 0x07;
                 let is_hl_operand = operand_code == 0x06;
-                let operand = self.get_alu_operand(operand_code, memory_bus);
+                let operand = self.get_alu_operand(operand_code, memory_bus); // Assuming this doesn't return Result
 
                 match (opcode >> 3) & 0x07 {
                     0 => self.add_a(operand, false), // ADD A, operand
@@ -591,156 +606,135 @@ impl Cpu {
                     7 => self.cp_a(operand),         // CP A, operand
                     _ => unreachable!(),
                 }
-                if is_hl_operand { 8 } else { 4 } // Base cycles
+                Ok(if is_hl_operand { 8 } else { 4 }) // Base cycles
             },
 
 
             // --- Conditional Returns ---
-            0xC0 => self.ret_cc(!self.get_flag(FLAG_Z), memory_bus), // RET NZ
-            0xC1 => { let val = self.pop_word(memory_bus); self.set_bc(val); 12 }, // POP BC
-            0xC2 => self.jp_cc(!self.get_flag(FLAG_Z), memory_bus), // JP NZ, nn
-            0xC3 => { self.pc = self.fetch_word(memory_bus); 16 }, // JP nn
-            0xC4 => self.call_cc(!self.get_flag(FLAG_Z), memory_bus), // CALL NZ, nn
-            0xC5 => { self.push_word(self.get_bc(), memory_bus); 16 }, // PUSH BC
-            0xC6 => { let v = self.fetch_byte(memory_bus); self.add_a(v, false); 8 }, // ADD A, n8
-            0xC7 => self.rst(0x00, memory_bus), // RST 00H
+            0xC0 => Ok(self.ret_cc(!self.get_flag(FLAG_Z), memory_bus)), // RET NZ
+            0xC1 => { let val = self.pop_word(memory_bus); self.set_bc(val); Ok(12) }, // POP BC
+            0xC2 => Ok(self.jp_cc(!self.get_flag(FLAG_Z), memory_bus)), // JP NZ, nn
+            0xC3 => { self.pc = self.fetch_word(memory_bus); Ok(16) }, // JP nn
+            0xC4 => Ok(self.call_cc(!self.get_flag(FLAG_Z), memory_bus)), // CALL NZ, nn
+            0xC5 => { self.push_word(self.get_bc(), memory_bus); Ok(16) }, // PUSH BC
+            0xC6 => { let v = self.fetch_byte(memory_bus); self.add_a(v, false); Ok(8) }, // ADD A, n8
+            0xC7 => Ok(self.rst(0x00, memory_bus)), // RST 00H
 
-            0xC8 => self.ret_cc(self.get_flag(FLAG_Z), memory_bus), // RET Z
-            0xC9 => { self.pc = self.pop_word(memory_bus); 16 }, // RET
-            0xCA => self.jp_cc(self.get_flag(FLAG_Z), memory_bus), // JP Z, nn
+            0xC8 => Ok(self.ret_cc(self.get_flag(FLAG_Z), memory_bus)), // RET Z
+            0xC9 => { self.pc = self.pop_word(memory_bus); Ok(16) }, // RET
+            0xCA => Ok(self.jp_cc(self.get_flag(FLAG_Z), memory_bus)), // JP Z, nn
             // CB Prefix
             0xCB => {
                 let cb_opcode = self.fetch_byte(memory_bus);
-                self.execute_cb(cb_opcode, memory_bus) // execute_cb returns cycles
+                Ok(self.execute_cb(cb_opcode, memory_bus)) // Assuming execute_cb returns cycles
             },
-            0xCC => self.call_cc(self.get_flag(FLAG_Z), memory_bus), // CALL Z, nn
+            0xCC => Ok(self.call_cc(self.get_flag(FLAG_Z), memory_bus)), // CALL Z, nn
             0xCD => { // CALL nn
                 let addr = self.fetch_word(memory_bus);
                 self.push_word(self.pc, memory_bus);
                 self.pc = addr;
-                24
+                Ok(24)
             },
-            0xCE => { let v = self.fetch_byte(memory_bus); self.add_a(v, true); 8 }, // ADC A, n8
-            0xCF => self.rst(0x08, memory_bus), // RST 08H
+            0xCE => { let v = self.fetch_byte(memory_bus); self.add_a(v, true); Ok(8) }, // ADC A, n8
+            0xCF => Ok(self.rst(0x08, memory_bus)), // RST 08H
 
 
-            0xD0 => self.ret_cc(!self.get_flag(FLAG_C), memory_bus), // RET NC
-            0xD1 => { let val = self.pop_word(memory_bus); self.set_de(val); 12 }, // POP DE
-            0xD2 => self.jp_cc(!self.get_flag(FLAG_C), memory_bus), // JP NC, nn
-            0xD3 => { panic!("Invalid opcode: 0xD3 at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
-            0xD4 => self.call_cc(!self.get_flag(FLAG_C), memory_bus), // CALL NC, nn
-            0xD5 => { self.push_word(self.get_de(), memory_bus); 16 }, // PUSH DE
-            0xD6 => { let v = self.fetch_byte(memory_bus); self.sub_a(v, false); 8 }, // SUB A, n8
-            0xD7 => self.rst(0x10, memory_bus), // RST 10H
+            0xD0 => Ok(self.ret_cc(!self.get_flag(FLAG_C), memory_bus)), // RET NC
+            0xD1 => { let val = self.pop_word(memory_bus); self.set_de(val); Ok(12) }, // POP DE
+            0xD2 => Ok(self.jp_cc(!self.get_flag(FLAG_C), memory_bus)), // JP NC, nn
+            0xD3 => Err(format!("Invalid opcode: 0xD3 at {:#06X}", instruction_pc)),
+            0xD4 => Ok(self.call_cc(!self.get_flag(FLAG_C), memory_bus)), // CALL NC, nn
+            0xD5 => { self.push_word(self.get_de(), memory_bus); Ok(16) }, // PUSH DE
+            0xD6 => { let v = self.fetch_byte(memory_bus); self.sub_a(v, false); Ok(8) }, // SUB A, n8
+            0xD7 => Ok(self.rst(0x10, memory_bus)), // RST 10H
 
-            0xD8 => self.ret_cc(self.get_flag(FLAG_C), memory_bus), // RET C
+            0xD8 => Ok(self.ret_cc(self.get_flag(FLAG_C), memory_bus)), // RET C
             0xD9 => { // RETI
                 self.pc = self.pop_word(memory_bus);
-                self.ime = true; // Enable interrupts AFTER executing RETI
-                // Note: This differs from EI which enables after the *next* instruction.
-                self.ime_scheduled = false; // Ensure no pending EI schedule interferes
-                16
+                self.ime = true;
+                self.ime_scheduled = false;
+                Ok(16)
             },
-            0xDA => self.jp_cc(self.get_flag(FLAG_C), memory_bus), // JP C, nn
-            0xDB => { panic!("Invalid opcode: 0xDB at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
-            0xDC => self.call_cc(self.get_flag(FLAG_C), memory_bus), // CALL C, nn
-            0xDD => { panic!("Invalid opcode: 0xDD at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
-            0xDE => { let v = self.fetch_byte(memory_bus); self.sub_a(v, true); 8 }, // SBC A, n8
-            0xDF => self.rst(0x18, memory_bus), // RST 18H
+            0xDA => Ok(self.jp_cc(self.get_flag(FLAG_C), memory_bus)), // JP C, nn
+            0xDB => Err(format!("Invalid opcode: 0xDB at {:#06X}", instruction_pc)),
+            0xDC => Ok(self.call_cc(self.get_flag(FLAG_C), memory_bus)), // CALL C, nn
+            0xDD => Err(format!("Invalid opcode: 0xDD at {:#06X}", instruction_pc)),
+            0xDE => { let v = self.fetch_byte(memory_bus); self.sub_a(v, true); Ok(8) }, // SBC A, n8
+            0xDF => Ok(self.rst(0x18, memory_bus)), // RST 18H
 
 
-            // LDH (a8), A --- Write A to 0xFF00 + n8
-            0xE0 => {
+            0xE0 => { // LDH (a8), A
                 let offset = self.fetch_byte(memory_bus) as u16;
                 memory_bus.write_byte(0xFF00 + offset, self.a);
-                12
+                Ok(12)
             },
-            // POP HL
-            0xE1 => { let val = self.pop_word(memory_bus); self.set_hl(val); 12 },
-             // LD (C), A --- Write A to 0xFF00 + C
-             0xE2 => {
+            0xE1 => { let val = self.pop_word(memory_bus); self.set_hl(val); Ok(12) }, // POP HL
+            0xE2 => { // LD (C), A
                 memory_bus.write_byte(0xFF00 + self.c as u16, self.a);
-                8
+                Ok(8)
             },
-            0xE3 | 0xE4 => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); } // Invalid
-            // PUSH HL
-            0xE5 => { self.push_word(self.get_hl(), memory_bus); 16 },
-            // AND A, n8
-            0xE6 => { let v = self.fetch_byte(memory_bus); self.and_a(v); 8 },
-            // RST 20H
-            0xE7 => self.rst(0x20, memory_bus),
+            0xE3 | 0xE4 => Err(format!("Invalid opcode: {:#04X} at {:#06X}", opcode, instruction_pc)),
+            0xE5 => { self.push_word(self.get_hl(), memory_bus); Ok(16) }, // PUSH HL
+            0xE6 => { let v = self.fetch_byte(memory_bus); self.and_a(v); Ok(8) }, // AND A, n8
+            0xE7 => Ok(self.rst(0x20, memory_bus)), // RST 20H
 
-            // ADD SP, r8
-            0xE8 => { self.add_sp_i8(memory_bus); 16 },
-            // JP HL
-            0xE9 => { self.pc = self.get_hl(); 4 },
-            // LD (a16), A
-            0xEA => {
+            0xE8 => { Ok(self.add_sp_i8(memory_bus)) }, // ADD SP, r8 - Assuming add_sp_i8 returns cycles
+            0xE9 => { self.pc = self.get_hl(); Ok(4) }, // JP HL
+            0xEA => { // LD (a16), A
                 let addr = self.fetch_word(memory_bus);
                 memory_bus.write_byte(addr, self.a);
-                16
+                Ok(16)
             },
-            0xEB | 0xEC | 0xED => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); } // Invalid
-            // XOR A, n8
-            0xEE => { let v = self.fetch_byte(memory_bus); self.xor_a(v); 8 },
-            // RST 28H
-            0xEF => self.rst(0x28, memory_bus),
+            0xEB | 0xEC | 0xED => Err(format!("Invalid opcode: {:#04X} at {:#06X}", opcode, instruction_pc)),
+            0xEE => { let v = self.fetch_byte(memory_bus); self.xor_a(v); Ok(8) }, // XOR A, n8
+            0xEF => Ok(self.rst(0x28, memory_bus)), // RST 28H
 
 
-            // LDH A, (a8) --- Read from 0xFF00 + n8 into A
-            0xF0 => {
+            0xF0 => { // LDH A, (a8)
                 let offset = self.fetch_byte(memory_bus) as u16;
                 self.a = memory_bus.read_byte(0xFF00 + offset);
-                12
+                Ok(12)
             },
-            // POP AF
-            0xF1 => { let val = self.pop_word(memory_bus); self.set_af(val); 12 },
-            // LD A, (C) --- Read from 0xFF00 + C into A
-            0xF2 => {
+            0xF1 => { let val = self.pop_word(memory_bus); self.set_af(val); Ok(12) }, // POP AF
+            0xF2 => { // LD A, (C)
                  self.a = memory_bus.read_byte(0xFF00 + self.c as u16);
-                 8
+                 Ok(8)
              },
-            // DI
-            0xF3 => {
+            0xF3 => { // DI
                 self.ime = false;
-                self.ime_scheduled = false; // Cancel pending EI
-                4
+                self.ime_scheduled = false;
+                Ok(4)
             },
-            0xF4 => { panic!("Invalid opcode: 0xF4 at {:04X}", self.pc.wrapping_sub(1)); } // Invalid
-            // PUSH AF
-            0xF5 => { self.push_word(self.get_af(), memory_bus); 16 },
-            // OR A, n8
-            0xF6 => { let v = self.fetch_byte(memory_bus); self.or_a(v); 8 },
-            // RST 30H
-            0xF7 => self.rst(0x30, memory_bus),
+            0xF4 => Err(format!("Invalid opcode: 0xF4 at {:#06X}", instruction_pc)),
+            0xF5 => { self.push_word(self.get_af(), memory_bus); Ok(16) }, // PUSH AF
+            0xF6 => { let v = self.fetch_byte(memory_bus); self.or_a(v); Ok(8) }, // OR A, n8
+            0xF7 => Ok(self.rst(0x30, memory_bus)), // RST 30H
 
-            // LD HL, SP+r8
-            0xF8 => { self.ld_hl_sp_i8(memory_bus); 12 },
-            // LD SP, HL
-            0xF9 => { self.sp = self.get_hl(); 8 },
-            // LD A, (a16)
-            0xFA => {
+            0xF8 => { Ok(self.ld_hl_sp_i8(memory_bus)) }, // LD HL, SP+r8 - Assuming ld_hl_sp_i8 returns cycles
+            0xF9 => { self.sp = self.get_hl(); Ok(8) }, // LD SP, HL
+            0xFA => { // LD A, (a16)
                  let addr = self.fetch_word(memory_bus);
                  self.a = memory_bus.read_byte(addr);
-                 16
+                 Ok(16)
             },
-            // EI
-            0xFB => {
-                // IME is enabled *after* the instruction following EI
+            0xFB => { // EI
                 self.ime_scheduled = true;
-                4
+                Ok(4)
             },
-            0xFC | 0xFD => { panic!("Invalid opcode: {:02X} at {:04X}", opcode, self.pc.wrapping_sub(1)); } // Invalid
-            // CP A, n8
-            0xFE => {
+            0xFC | 0xFD => Err(format!("Invalid opcode: {:#04X} at {:#06X}", opcode, instruction_pc)),
+            0xFE => { // CP A, n8
                  let value = self.fetch_byte(memory_bus);
                  self.cp_a(value);
-                 8
+                 Ok(8)
             },
-            // RST 38H
-            0xFF => self.rst(0x38, memory_bus),
+            0xFF => Ok(self.rst(0x38, memory_bus)), // RST 38H
 
-            // _ => { ... } // Should be covered by ranges now
+            // Catch-all for any remaining unknown opcodes
+            _ => Err(format!(
+                "Unknown opcode: {:#04X} encountered at address {:#06X}",
+                opcode,
+                instruction_pc
+            )),
         }
     }
 

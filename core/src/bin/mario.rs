@@ -77,6 +77,7 @@ const DEBUG_PALETTE: [Color; 4] = [
     Color::RGB(0x55, 0x55, 0x55), Color::RGB(0x00, 0x00, 0x00),
 ];
 
+pub type CpuResult<T> = Result<T, String>;
 
 // --- Drawing Helper Functions ---
 
@@ -286,7 +287,6 @@ fn draw_disassembly_debug(
     Ok(())
 }
 
-
 // --- Main Function ---
 pub fn main() -> Result<(), String> {
     // --- Argument Parsing ---
@@ -323,10 +323,8 @@ pub fn main() -> Result<(), String> {
     // --- Calculate Window Dimensions at Runtime ---
     let input_debug_area_height: u32 = cmp::max(DPAD_AREA_HEIGHT, ACTION_AREA_HEIGHT);
     let mid_pane_height = VRAM_VIEW_HEIGHT + PADDING + input_debug_area_height;
-    // Adjust right pane height calculation if adding more debug views later
     let right_pane_height = mid_pane_height + PADDING + DISASM_AREA_HEIGHT;
     let right_pane_width = cmp::max(cmp::max(VRAM_VIEW_WIDTH, INPUT_DEBUG_AREA_WIDTH), DISASM_AREA_WIDTH);
-
     let total_window_height: u32 = cmp::max(GB_SCREEN_HEIGHT, right_pane_height);
     let total_window_width: u32 = GB_SCREEN_WIDTH + PADDING + right_pane_width;
 
@@ -343,39 +341,31 @@ pub fn main() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Get the texture creator (needed for TTF rendering)
     let texture_creator = canvas.texture_creator();
-
-
     println!("Initializing event pump...");
     let mut event_pump = sdl_context.event_pump()?;
 
     // --- Emulator Initialization ---
     println!("Initializing APU...");
-    let apu = Apu::new(); // <-- Initialize APU
-    // Wrap APU in Rc<RefCell> if MemoryBus needs shared mutable access
+    let apu = Apu::new();
+    // *** Modify MemoryBus::new to accept APU if needed ***
     // let apu_ref = Rc::new(RefCell::new(apu));
-
+    // let mut memory_bus = MemoryBus::new(apu_ref.clone());
     println!("Initializing memory bus...");
-    // *** CRITICAL: Modify your MemoryBus::new() or add a method ***
-    // *** to accept the APU (likely as Rc<RefCell<Apu>>)      ***
-    // Example: let mut memory_bus = MemoryBus::new(apu_ref.clone());
-    let mut memory_bus = MemoryBus::new(); // <-- Placeholder - MUST BE MODIFIED
+    let mut memory_bus = MemoryBus::new(); // <-- Placeholder - MUST BE MODIFIED if APU is integrated via bus
 
     println!("Loading ROM: {}", rom_path.display());
     match std::fs::read(rom_path) {
-        Ok(rom_data) => {
+        Ok(rom_data) => { // Use a block to print size before borrow/move
+            let rom_size = rom_data.len();
             memory_bus.load_rom(&rom_data);
-            println!("ROM loaded successfully ({} bytes)", rom_data.len());
+            println!("ROM loaded successfully ({} bytes)", rom_size); // Moved success message here
         }
-        Err(e) => {
-             eprintln!("FATAL: Failed to load ROM '{}': {}", rom_path.display(), e);
-             return Err(format!("Failed to load ROM: {}", e));
-         }
+        Err(e) => return Err(format!("Failed to load ROM '{}': {}", rom_path.display(), e)),
     }
+    println!("ROM loaded successfully.");
 
-    let skip_boot_rom = true; // Keep skipping boot ROM for simplicity
-
+    let skip_boot_rom = true;
     println!("Initializing CPU (skip_boot_rom={})...", skip_boot_rom);
     let mut cpu = Cpu::new(skip_boot_rom);
 
@@ -386,13 +376,9 @@ pub fn main() -> Result<(), String> {
 
     println!("Initializing PPU...");
     let mut ppu = Ppu::new();
+    // Make APU mutable if owned by main loop
+    let mut apu = apu;
 
-    // Re-declare APU as mutable here to pass to step function
-    // This assumes APU state is managed within the main loop,
-    // If MemoryBus holds the Rc<RefCell>, this isn't needed here.
-    let mut apu = apu; // If not using Rc<RefCell> approach
-
-    // --- Main Emulator Loop ---
     println!("Starting main loop...");
     'main_loop: loop {
         let frame_start_time = Instant::now();
@@ -404,72 +390,68 @@ pub fn main() -> Result<(), String> {
                     println!("Exit requested.");
                     break 'main_loop;
                 }
-                Event::KeyDown { keycode: Some(key), repeat: false, .. } => {
-                    memory_bus.key_down(key);
-                }
-                Event::KeyUp { keycode: Some(key), repeat: false, .. } => {
-                    memory_bus.key_up(key);
-                }
-                _ => {} // Ignore other events
+                Event::KeyDown { keycode: Some(key), repeat: false, .. } => memory_bus.key_down(key),
+                Event::KeyUp { keycode: Some(key), repeat: false, .. } => memory_bus.key_up(key),
+                _ => {}
             }
         }
 
         // --- 2. Emulate One Frame ---
         let mut cycles_this_frame: u32 = 0;
         while cycles_this_frame < CYCLES_PER_FRAME {
-            // Pass mutable references as needed
-            let executed_cycles = cpu.step(&mut memory_bus) as u32;
-            ppu.step(executed_cycles, &mut memory_bus);
-            // *** Step the APU ***
-            apu.step(executed_cycles, &mut memory_bus); // <-- Call APU step
-            // TODO: Step Timer
-            cycles_this_frame += executed_cycles;
-            // Interrupt handling is likely within cpu.step or needs checking after steps
+            // *** Handle Result from cpu.step ***
+            let step_result = cpu.step(&mut memory_bus);
+
+            match step_result {
+                Ok(executed_cycles_u8) => {
+                    let executed_cycles = executed_cycles_u8 as u32;
+                    ppu.step(executed_cycles, &mut memory_bus);
+                    apu.step(executed_cycles, &mut memory_bus);
+                    // TODO: Step Timer
+                    cycles_this_frame += executed_cycles;
+                    // Check interrupts here or within cpu.step logic
+                }
+                Err(error_message) => {
+                    // CPU encountered an error (e.g., unknown opcode)
+                    eprintln!("\n==================== CPU Error ====================");
+                    eprintln!("Emulator halted due to CPU error:");
+                    eprintln!(" -> {}", error_message);
+                    eprintln!("====================================================\n");
+
+                    // Optionally, print CPU state here for debugging
+                    // println!("CPU State at Error:\n{:?}", cpu);
+
+                    break 'main_loop; // Stop the emulator
+                }
+            }
         }
 
         // --- 3. Update Debug Views ---
         ppu.render_vram_debug(&memory_bus);
-        // TODO: Add APU debug visualization if desired
 
         // --- 4. Drawing ---
-        canvas.set_draw_color(Color::RGB(20, 20, 20)); // Background
+        canvas.set_draw_color(Color::RGB(20, 20, 20));
         canvas.clear();
 
-        // Draw GB Screen (Top-Left)
         draw_gb_screen(&mut canvas, ppu.get_frame_buffer(), 0, 0);
 
-        // --- Right Pane Calculations ---
         let right_pane_x = (GB_SCREEN_WIDTH + PADDING) as i32;
-
-        // Draw VRAM Debug (Top-Right)
         let vram_view_y = 0;
         draw_vram_debug(&mut canvas, ppu.get_vram_debug_buffer(), right_pane_x, vram_view_y);
 
-        // Draw Input Debug (Middle-Right, below VRAM)
         let input_view_y = vram_view_y + VRAM_VIEW_HEIGHT as i32 + PADDING as i32;
         draw_input_debug(&mut canvas, &memory_bus.joypad, right_pane_x, input_view_y);
 
-        // Draw Disassembly Debug (Bottom-Right, below Input)
+        let input_debug_area_height: u32 = cmp::max(DPAD_AREA_HEIGHT, ACTION_AREA_HEIGHT); // Recalculate here for clarity
         let disasm_view_y = input_view_y + input_debug_area_height as i32 + PADDING as i32;
-        // *** This call requires the `disassemble_instruction` method in Cpu ***
         if let Err(e) = draw_disassembly_debug(
-            &mut canvas,
-            &texture_creator, // Pass texture creator
-            &font,
-            &cpu,
-            &memory_bus,
-            right_pane_x,
-            disasm_view_y,
-            DISASM_LINES_BEFORE,
-            DISASM_LINES_AFTER,
+            &mut canvas, &texture_creator, &font, &cpu, &memory_bus,
+            right_pane_x, disasm_view_y, DISASM_LINES_BEFORE, DISASM_LINES_AFTER,
         ) {
-             eprintln!("Error drawing disassembly: {}", e);
-             // Decide if you want to break the loop on drawing errors
-             // break 'main_loop;
+            eprintln!("Error drawing disassembly: {}", e);
+            // break 'main_loop; // Optional: Stop on drawing error
         }
 
-
-        // Present the drawn frame
         canvas.present();
 
         // --- 5. Frame Timing / Rate Limiting ---
@@ -477,19 +459,16 @@ pub fn main() -> Result<(), String> {
         if elapsed_time < TARGET_FRAME_DURATION {
             let sleep_duration = TARGET_FRAME_DURATION.saturating_sub(elapsed_time);
             if sleep_duration > Duration::from_millis(1) {
-                // Sleep for most of the duration, but leave a millisecond for yield loop
                 thread::sleep(sleep_duration.saturating_sub(Duration::from_millis(1)));
             }
-            // Busy-wait loop for the final moments to improve accuracy
             while Instant::now() < frame_start_time + TARGET_FRAME_DURATION {
-                thread::yield_now(); // Yield to prevent pegging CPU core
+                thread::yield_now();
             }
-        } else {
-            // Optional: Log if frame took too long
-            // eprintln!("Warning: Frame took longer than target: {:?}", elapsed_time);
         }
-    } // --- End of main_loop ---
+        // Optional: else { eprintln!("Warning: Frame took too long: {:?}", elapsed_time); }
+
+    } // End 'main_loop
 
     println!("Emulator stopped.");
     Ok(())
-} // --- End of main ---
+}

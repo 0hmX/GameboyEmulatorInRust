@@ -162,7 +162,7 @@ impl Ppu {
         // Combine with the current mode and coincidence flag (read-only bits)
         let mut new_stat = writable_bits | self.state.ppu_mode;
         if self.state.lyc_eq_ly {
-            new_stat |= (1 << STAT_LYC_EQ_LY_FLAG);
+            new_stat |= 1 << STAT_LYC_EQ_LY_FLAG;
         }
          // Bit 7 is always set (unused, reads as 1)
         new_stat |= 0x80;

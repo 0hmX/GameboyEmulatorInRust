@@ -53,13 +53,13 @@ impl RtcRegisters {
         self.last_updated_secs = now_secs;
 
         // Cascade updates through seconds, minutes, hours, days
-        let mut total_seconds = u64::from(self.seconds) + elapsed_secs;
+        let total_seconds = u64::from(self.seconds) + elapsed_secs;
         self.seconds = (total_seconds % 60) as u8;
 
-        let mut total_minutes = u64::from(self.minutes) + (total_seconds / 60);
+        let total_minutes = u64::from(self.minutes) + (total_seconds / 60);
         self.minutes = (total_minutes % 60) as u8;
 
-        let mut total_hours = u64::from(self.hours) + (total_minutes / 60);
+        let total_hours = u64::from(self.hours) + (total_minutes / 60);
         self.hours = (total_hours % 24) as u8;
 
         // Handle day counter (9 bits total: DH bit 0 + DL)

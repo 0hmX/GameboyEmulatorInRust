@@ -1,7 +1,7 @@
 use super::constants::*;
-use super::state::PpuState; // If state information is needed
+use super::state::PpuState;
 use crate::memory_bus::MemoryBus;
-use crate::memory_map; // Use memory_map for register addresses
+use crate::memory_map;
 
 pub(super) fn render_scanline(
     line_buffer: &mut [u8; GB_WIDTH],
@@ -10,7 +10,7 @@ pub(super) fn render_scanline(
 ) {
     let y = state.current_scanline;
     if y >= GB_HEIGHT as u8 {
-        return; // Only render visible lines (0-143)
+        return;
     }
 
     // Read necessary registers for rendering this line
@@ -35,8 +35,8 @@ pub(super) fn render_scanline(
     for x in 0..GB_WIDTH as u8 {
         let x_usize = x as usize;
 
-        let mut final_pixel_color_idx = 0; // Default to palette index 0
-        let mut bg_win_pixel_idx = 0; // Store the raw index for priority checks
+        let final_pixel_color_idx;
+        let bg_win_pixel_idx;
 
         // --- Render Background / Window ---
         if bg_win_display_enabled {

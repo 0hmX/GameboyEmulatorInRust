@@ -1,5 +1,4 @@
-use super::{Cpu, CpuResult};
-use crate::memory_bus::MemoryBus;
+use super::Cpu;
 
 // --- CB Prefix Implementations ---
 impl Cpu {

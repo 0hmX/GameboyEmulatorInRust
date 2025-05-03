@@ -1,4 +1,3 @@
-use crate::memory_map::{IO_REGISTERS_START, JOYPAD_INTERRUPT_BIT, P1_JOYP_ADDR};
 use sdl2::keyboard::Keycode;
 
 /// Represents the state of the Game Boy's buttons.

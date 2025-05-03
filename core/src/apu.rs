@@ -1,5 +1,4 @@
 use crate::memory_bus::MemoryBus;
-use std::collections::VecDeque; // Keep if you plan sample buffering
 
 // --- Constants --- (Keep as before)
 const CPU_FREQ: u32 = 4_194_304;

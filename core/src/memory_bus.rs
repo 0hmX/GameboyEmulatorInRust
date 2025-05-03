@@ -271,7 +271,7 @@ impl MemoryBus {
             self.current_ram_bank = 0;
         }
         if self.num_ram_banks > 0 {
-            self.current_ram_bank &= (self.num_ram_banks - 1);
+            self.current_ram_bank &= self.num_ram_banks - 1;
         } else {
             self.current_ram_bank = 0;
         }
@@ -403,7 +403,7 @@ impl MemoryBus {
                     MbcType::Mbc3 => {
                         let bank = value & 0x7F;
                         self.current_rom_bank = if bank == 0 { 1 } else { bank as usize };
-                        self.current_rom_bank &= (self.num_rom_banks.max(1) - 1);
+                        self.current_rom_bank &= self.num_rom_banks.max(1) - 1;
                     }
                     _ => {}
                 }
@@ -420,7 +420,7 @@ impl MemoryBus {
                             self.current_ram_bank = value as usize;
                             self.rtc_mapped_register = 0; // Indicate RAM selected
                              if self.num_ram_banks > 0 {
-                                self.current_ram_bank &= (self.num_ram_banks - 1);
+                                self.current_ram_bank &= self.num_ram_banks - 1;
                             } else {
                                 self.current_ram_bank = 0;
                             }
@@ -544,14 +544,12 @@ impl MemoryBus {
         }
     }
 
-    // --- Helper methods ---
-
     /// Performs an OAM DMA transfer.
     fn perform_dma_transfer(&mut self, source_high_byte: u8) {
         // TODO: This should block CPU access to most memory for ~160 machine cycles.
         // This simplified version performs the copy instantly.
         let source_start_addr = (source_high_byte as u16) << 8;
-        if source_start_addr >= 0xFE00 && source_start_addr <= 0xFFFF {
+        if source_start_addr >= 0xFE00 {
              // DMA from OAM/IO/HRAM/IE is often restricted or has weird behavior.
              // Let's prevent it from these areas for now. Common sources are 0x0000-0xDFFF.
              // Pandocs: "DMA source cannot be HRAM (FF80-FFFE)" - Let's block FE00+ entirely.
@@ -589,8 +587,6 @@ impl MemoryBus {
             self.rtc.update();
         }
     }
-
-    // --- Public Input Handling Methods (Delegate to Joypad) ---
 
     /// Called by the frontend when a key mapped to a Game Boy button is pressed down.
     pub fn key_down(&mut self, key: Keycode) {

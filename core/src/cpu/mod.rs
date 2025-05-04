@@ -1,18 +1,19 @@
 //! The Sharp SM83 CPU core implementation.
 
-use crate::instruction::{CB_INSTRUCTIONS, INSTRUCTIONS};
 use crate::memory_bus::MemoryBus;
 use crate::memory_map; // Use qualified paths for memory map constants
 use crate::memory_map::{
     JOYPAD_INTERRUPT_BIT, LCD_STAT_INTERRUPT_BIT, SERIAL_INTERRUPT_BIT, TIMER_INTERRUPT_BIT,
     VBLANK_INTERRUPT_BIT,
 };
+use instruction::{CB_INSTRUCTIONS, INSTRUCTIONS};
 use log;
 
 // Declare submodules
 mod constants;
 #[macro_use]
 mod ops_macros;
+mod instruction;
 mod ops_alu;
 mod ops_cb;
 mod ops_control;

@@ -63,7 +63,7 @@ pub const INPUT_DEBUG_AREA_HEIGHT: u32 = const_max_u32(DPAD_AREA_HEIGHT, BUTTONS
 // --- Disassembly Debug ---
 // <<< --- RECOMMEND using a relative path or embedding --- >>>
 // Example relative path (assumes an 'assets/fonts' directory next to 'src')
-pub const FONT_PATH: &str = "/home/ankan/GameBoy/core/src/app/Roboto-Regular.ttf";
+pub const FONT_PATH: &str = "/home/ankan/GameboyEmulatorInRust/core/src/app/Roboto-Regular.ttf";
 // Your original absolute path:
 // pub const FONT_PATH: &str = "/home/ankan/GameBoy/core/src/app/Roboto-Regular.ttf";
 pub const DEBUG_FONT_SIZE: u16 = 14;

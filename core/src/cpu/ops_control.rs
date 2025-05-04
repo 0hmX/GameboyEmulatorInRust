@@ -1,5 +1,5 @@
+use super::instruction::CB_INSTRUCTIONS;
 use super::{Cpu, CpuResult, constants::*};
-use crate::instruction::CB_INSTRUCTIONS;
 use crate::memory_bus::MemoryBus;
 use crate::memory_map;
 use log;

@@ -1,6 +1,5 @@
 pub mod apu;
 pub mod cpu;
-pub mod instruction;
 pub mod joypad;
 pub mod mbc;
 pub mod memory_bus;

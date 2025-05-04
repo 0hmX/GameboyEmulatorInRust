@@ -131,50 +131,63 @@ pub fn draw_disassembly_debug(
     ))?;
 
     let pc = cpu.pc();
-    let mut current_addr = pc; // Start disassembling near PC
+    let mut current_addr = pc; // We'll calculate the start address later
 
-    // --- VERY Simple Disassembly Logic (Placeholder) ---
-    // A real disassembler is complex. This just shows bytes and a NOP example.
-    // It doesn't handle variable instruction lengths correctly for seeking backwards.
-    // We'll just display lines starting near PC.
-    // Try to start a few instructions before PC (rough estimate)
-    // This backward seeking is inherently flawed without full disassembly analysis.
-    let mut start_addr = pc.saturating_sub((constants::DISASM_LINES_BEFORE * 2) as u16); // Guess 2 bytes/instr avg
+    // --- Attempt to find a reasonable start address ---
+    // This is tricky without full backward disassembly. We'll iterate backwards
+    // a few times, disassembling each instruction to find a likely start point.
+    // This is better than guessing fixed offsets but still not perfect.
+    let mut start_addr = pc;
+    for _ in 0..constants::DISASM_LINES_BEFORE {
+        // To step back accurately, we'd ideally need to know the length of the *previous*
+        // instruction. This requires a more complex backward scan or heuristics.
+        // A simpler, less accurate approach is to guess an average length (e.g., 2)
+        // or try disassembling from addr-1, addr-2, addr-3 and see if they *end* at `start_addr`.
+        //
+        // Let's stick to a simpler (but still imperfect) fixed offset for now,
+        // as true backward disassembly is complex. The forward rendering below is correct.
+        start_addr = start_addr.saturating_sub(2); // Guess average 2 bytes/instruction backward
+                                                   // TODO: Implement more robust backward seeking if needed.
+    }
+    // Ensure start_addr doesn't go below 0 after subtractions
+    // The simple subtraction might land us mid-instruction. We accept this limitation for now.
 
+    current_addr = start_addr;
+
+    // --- Disassemble and Draw Lines Forward ---
     for i in 0..constants::DISASM_TOTAL_LINES {
-        let line_addr = start_addr;
+        let line_addr = current_addr; // Address for this line
 
-        // Fetch bytes (handle potential read errors gracefully, maybe show "??")
-        let byte1 = memory_bus.read_byte(start_addr);
-        let byte2 = memory_bus.read_byte(start_addr.wrapping_add(1));
-        let byte3 = memory_bus.read_byte(start_addr.wrapping_add(2));
+        // Get the disassembled instruction and its actual length
+        let (mnemonic, instr_len_u8) = cpu.disassemble_instruction(line_addr, memory_bus);
+        let instr_len = instr_len_u8 as u16;
 
-        // Placeholder disassembly: just show address and bytes
-        let mut disasm_text = format!(
-            "${:04X}: {:02X} {:02X} {:02X}",
-            line_addr, byte1, byte2, byte3
-        );
-        let mut instr_len: u16 = 1; // Default length
-
-        // Extremely basic instruction check (replace with actual disassembler call)
-        if byte1 == 0x00 {
-            // NOP
-            disasm_text.push_str(" NOP");
-            instr_len = 1;
-        } else if byte1 == 0xC3 {
-            // JP nn
-            let target = u16::from_le_bytes([byte2, byte3]);
-            disasm_text = format!(
-                "${:04X}: {:02X} {:02X} {:02X} JP ${:04X}",
-                line_addr, byte1, byte2, byte3, target
-            );
-            instr_len = 3;
-        } else {
-            disasm_text.push_str(" ..."); // Indicate unknown instruction
-            instr_len = 1; // Guess length
+        // Read the raw bytes for this instruction to display them
+        let mut bytes_str = String::new();
+        let mut raw_bytes: Vec<u8> = Vec::with_capacity(instr_len as usize);
+        for offset in 0..instr_len {
+            // Ensure we don't wrap around address space excessively if near 0xFFFF
+            let byte_addr = line_addr.wrapping_add(offset);
+            let byte = memory_bus.read_byte(byte_addr);
+            raw_bytes.push(byte);
+            bytes_str.push_str(&format!("{:02X} ", byte));
         }
 
-        // Determine text color
+        // Pad the byte string so the mnemonics align nicely
+        // Max standard instruction length is 3 bytes (XX XX XX ). CB prefix instructions are 2 bytes (CB XX ).
+        // We need space for up to 3 hex pairs + 3 spaces = 9 characters.
+        let byte_display_width = constants::MAX_INSTR_BYTES * 3; // e.g., 3 bytes * (2 chars + 1 space) = 9
+        while bytes_str.len() < byte_display_width {
+            bytes_str.push(' ');
+        }
+        // Ensure it doesn't exceed the width if somehow instr_len was > MAX_INSTR_BYTES
+        bytes_str.truncate(byte_display_width);
+
+
+        // Format the complete line: Address: Bytes Mnemonic
+        let disasm_text = format!("${:04X}: {}{}", line_addr, bytes_str, mnemonic);
+
+        // Determine text color (highlight the line at PC)
         let text_color = if line_addr == pc {
             constants::DEBUG_PC_COLOR
         } else {
@@ -184,7 +197,7 @@ pub fn draw_disassembly_debug(
         // Render the text line
         let surface = font
             .render(&disasm_text)
-            .blended(text_color) // Use blended for potentially better quality
+            .blended(text_color)
             .map_err(|e| e.to_string())?;
 
         let texture = texture_creator
@@ -197,27 +210,35 @@ pub fn draw_disassembly_debug(
             ..
         } = texture.query();
 
-        // Calculate Y position for this line **USING i32 CASTING**
+        // Calculate Y position for this line
         let current_line_y = pane_y + (i as i32 * constants::DISASM_LINE_HEIGHT as i32);
 
         // Define destination rectangle for the text
-        let dest_rect = Rect::new(pane_x + 5, current_line_y, text_width, text_height); // Add padding
+        let dest_rect = Rect::new(
+            pane_x + 5, // Add some left padding
+            current_line_y,
+            text_width,
+            text_height,
+        );
 
         // Copy the texture to the canvas
         canvas.copy(&texture, None, Some(dest_rect))?;
 
-        // Advance address for the next line based on *guessed* instruction length
-        start_addr = start_addr.wrapping_add(instr_len);
+        // Advance address for the next line using the *actual* instruction length
+        current_addr = current_addr.wrapping_add(instr_len);
 
-        // Simple protection against infinite loops if instr_len is 0 (shouldn't happen)
+        // Safeguard against zero-length instructions (shouldn't happen with valid disassembler)
         if instr_len == 0 {
-            start_addr = start_addr.wrapping_add(1);
+            // If this happens, the disassembler has a bug or encountered truly invalid data.
+            // We advance by 1 to avoid an infinite loop.
+            // Log this error if possible.
+            // eprintln!("Warning: Disassembled instruction at ${:04X} reported zero length.", line_addr);
+            current_addr = current_addr.wrapping_add(1);
         }
     }
 
     Ok(())
 }
-
 /// Draws the input state debug view.
 pub fn draw_input_debug(
     canvas: &mut Canvas<Window>,

@@ -75,6 +75,7 @@ pub const DISASM_AREA_WIDTH: u32 = 350; // Fixed width for the disassembly pane 
 pub const DISASM_AREA_HEIGHT: u32 = DISASM_LINE_HEIGHT * (DISASM_TOTAL_LINES as u32); // Calculated height
 pub const DEBUG_PC_COLOR: Color = Color::RGB(255, 255, 0); // Yellow for current PC line
 pub const DEBUG_TEXT_COLOR: Color = Color::RGB(220, 220, 220); // Light Gray for text
+pub const MAX_INSTR_BYTES: usize = 3;
 
 // --- Palettes ---
 pub const PALETTE: [Color; 4] = [

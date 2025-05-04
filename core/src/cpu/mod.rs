@@ -576,15 +576,15 @@ impl Cpu {
                             || instr.mnemonic == "ADD SP, r8"
                             || instr.mnemonic == "LD HL, SP+r8"
                         {
-                            format!(" ${:+}", d8 as i8)
+                            format!("${:+}", d8 as i8)
                         } else {
-                            format!(" ${:02X}", d8)
+                            format!("xb{:02X}", d8)
                         }
                     }
                     3 => {
                         let lo = bus.read_byte(address.wrapping_add(1));
                         let hi = bus.read_byte(address.wrapping_add(2));
-                        format!(" ${:04X}", u16::from_le_bytes([lo, hi]))
+                        format!("0x{:04X}", u16::from_le_bytes([lo, hi]))
                     }
                     _ => "".to_string(),
                 };

@@ -163,29 +163,29 @@ pub fn draw_disassembly_debug(
         let instr_len = instr_len_u8 as u16;
 
         // Read the raw bytes for this instruction to display them
-        let mut bytes_str = String::new();
-        let mut raw_bytes: Vec<u8> = Vec::with_capacity(instr_len as usize);
-        for offset in 0..instr_len {
-            // Ensure we don't wrap around address space excessively if near 0xFFFF
-            let byte_addr = line_addr.wrapping_add(offset);
-            let byte = memory_bus.read_byte(byte_addr);
-            raw_bytes.push(byte);
-            bytes_str.push_str(&format!("{:02X} ", byte));
-        }
+        // let mut bytes_str = String::new();
+        // let mut raw_bytes: Vec<u8> = Vec::with_capacity(instr_len as usize);
+        // for offset in 0..instr_len {
+        //     // Ensure we don't wrap around address space excessively if near 0xFFFF
+        //     let byte_addr = line_addr.wrapping_add(offset);
+        //     let byte = memory_bus.read_byte(byte_addr);
+        //     raw_bytes.push(byte);
+        //     bytes_str.push_str(&format!("{:02X} ", byte));
+        // }
 
         // Pad the byte string so the mnemonics align nicely
         // Max standard instruction length is 3 bytes (XX XX XX ). CB prefix instructions are 2 bytes (CB XX ).
         // We need space for up to 3 hex pairs + 3 spaces = 9 characters.
-        let byte_display_width = constants::MAX_INSTR_BYTES * 3; // e.g., 3 bytes * (2 chars + 1 space) = 9
-        while bytes_str.len() < byte_display_width {
-            bytes_str.push(' ');
-        }
+        // let byte_display_width = constants::MAX_INSTR_BYTES * 3; // e.g., 3 bytes * (2 chars + 1 space) = 9
+        // while bytes_str.len() < byte_display_width {
+        //     bytes_str.push(' ');
+        // }
         // Ensure it doesn't exceed the width if somehow instr_len was > MAX_INSTR_BYTES
-        bytes_str.truncate(byte_display_width);
+        // bytes_str.truncate(byte_display_width);
 
 
         // Format the complete line: Address: Bytes Mnemonic
-        let disasm_text = format!("${:04X}: {}{}", line_addr, bytes_str, mnemonic);
+        let disasm_text = format!("0x{:04X}: {}", line_addr, mnemonic);
 
         // Determine text color (highlight the line at PC)
         let text_color = if line_addr == pc {

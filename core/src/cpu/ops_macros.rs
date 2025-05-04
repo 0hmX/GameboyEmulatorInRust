@@ -27,15 +27,17 @@ macro_rules! ld_hlp_r {
 
 // --- ALU Macros ---
 macro_rules! alu_a_r {
-    ($name:ident, $op:ident, $r2:ident) => { // No carry version
+    ($name:ident, $op:ident, $r2:ident) => {
+        // No carry version
         #[inline(always)]
         pub fn $name(&mut self, _bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             self.$op(self.$r2, false);
             Ok(0)
         }
     };
-    ($name:ident, $op:ident, $r2:ident, carry) => { // With carry version
-         #[inline(always)]
+    ($name:ident, $op:ident, $r2:ident, carry) => {
+        // With carry version
+        #[inline(always)]
         pub fn $name(&mut self, _bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             self.$op(self.$r2, true);
             Ok(0)
@@ -43,7 +45,8 @@ macro_rules! alu_a_r {
     };
 }
 macro_rules! alu_a_hlp {
-    ($name:ident, $op:ident) => { // No carry version
+    ($name:ident, $op:ident) => {
+        // No carry version
         pub fn $name(&mut self, bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             let addr = self.get_hl();
             let val = bus.read_byte(addr);
@@ -51,7 +54,8 @@ macro_rules! alu_a_hlp {
             Ok(0)
         }
     };
-    ($name:ident, $op:ident, carry) => { // With carry version
+    ($name:ident, $op:ident, carry) => {
+        // With carry version
         pub fn $name(&mut self, bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             let addr = self.get_hl();
             let val = bus.read_byte(addr);
@@ -62,29 +66,33 @@ macro_rules! alu_a_hlp {
 }
 
 macro_rules! cb_reg_op {
-    ($name:ident, $op:ident, $reg:ident) => { // Bitwise op
+    ($name:ident, $op:ident, $reg:ident) => {
+        // Bitwise op
         #[inline(always)]
         pub fn $name(&mut self, _bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             self.$reg = self.$op(self.$reg);
             Ok(0)
         }
     };
-    ($name:ident, bit, $bit:expr, $reg:ident) => { // BIT op
+    ($name:ident, bit, $bit:expr, $reg:ident) => {
+        // BIT op
         #[inline(always)]
         pub fn $name(&mut self, _bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             self.op_bit($bit, self.$reg);
             Ok(0)
         }
     };
-    ($name:ident, res, $bit:expr, $reg:ident) => { // RES op
+    ($name:ident, res, $bit:expr, $reg:ident) => {
+        // RES op
         #[inline(always)]
         pub fn $name(&mut self, _bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             self.$reg &= !(1 << $bit);
             Ok(0)
         }
     };
-    ($name:ident, set, $bit:expr, $reg:ident) => { // SET op
-         #[inline(always)]
+    ($name:ident, set, $bit:expr, $reg:ident) => {
+        // SET op
+        #[inline(always)]
         pub fn $name(&mut self, _bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             self.$reg |= (1 << $bit);
             Ok(0)
@@ -92,7 +100,8 @@ macro_rules! cb_reg_op {
     };
 }
 macro_rules! cb_hlp_op {
-    ($name:ident, $op:ident) => { // Bitwise op on (HL)
+    ($name:ident, $op:ident) => {
+        // Bitwise op on (HL)
         pub fn $name(&mut self, bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             let addr = self.get_hl();
             let value = bus.read_byte(addr);
@@ -101,14 +110,16 @@ macro_rules! cb_hlp_op {
             Ok(0)
         }
     };
-    ($name:ident, bit, $bit:expr) => { // BIT op on (HL)
+    ($name:ident, bit, $bit:expr) => {
+        // BIT op on (HL)
         pub fn $name(&mut self, bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             let value = bus.read_byte(self.get_hl());
             self.op_bit($bit, value);
             Ok(0)
         }
     };
-    ($name:ident, res, $bit:expr) => { // RES op on (HL)
+    ($name:ident, res, $bit:expr) => {
+        // RES op on (HL)
         pub fn $name(&mut self, bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             let addr = self.get_hl();
             let value = bus.read_byte(addr);
@@ -117,7 +128,8 @@ macro_rules! cb_hlp_op {
             Ok(0)
         }
     };
-    ($name:ident, set, $bit:expr) => { // SET op on (HL)
+    ($name:ident, set, $bit:expr) => {
+        // SET op on (HL)
         pub fn $name(&mut self, bus: &mut crate::memory_bus::MemoryBus) -> super::CpuResult<u16> {
             let addr = self.get_hl();
             let value = bus.read_byte(addr);

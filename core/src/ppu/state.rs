@@ -5,12 +5,12 @@ use super::constants::*;
 pub struct PpuState {
     pub(super) dots: u32, // Current dot within the scanline (T-cycle counter)
     pub(super) current_scanline: u8, // Current scanline (LY register value, 0-153)
-    pub(super) ppu_mode: u8,         // Current PPU mode (0, 1, 2, 3)
-    pub(super) lyc_eq_ly: bool,      // Status of LYC == LY comparison
+    pub(super) ppu_mode: u8, // Current PPU mode (0, 1, 2, 3)
+    pub(super) lyc_eq_ly: bool, // Status of LYC == LY comparison
     pub(super) stat_interrupt_line: bool, // Tracks the state of the STAT interrupt line (high/low)
     pub(super) vblank_just_occurred: bool, // Flag to signal VBlank interrupt on mode transition
-    pub(super) lcdc: u8,             // Cache of LCDC register value for the current step
-    pub(super) stat: u8,             // Cache of STAT register value for the current step
+    pub(super) lcdc: u8,  // Cache of LCDC register value for the current step
+    pub(super) stat: u8,  // Cache of STAT register value for the current step
 }
 
 impl PpuState {

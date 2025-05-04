@@ -10,7 +10,8 @@ pub(super) fn render_vram_debug(
     // Use a simple fixed palette mapping index 0-3 to shades 0-3 for clarity
     let get_debug_shade = |index: u8| index;
 
-    for tile_idx in 0..NUM_TILES_TO_SHOW { // Render all 384 tiles
+    for tile_idx in 0..NUM_TILES_TO_SHOW {
+        // Render all 384 tiles
         // Calculate the base address for this tile (16 bytes per tile)
         // Tiles 0-255 are in $8000-$8FFF
         // Tiles 256-383 map to $8800-$97FF (which corresponds to tile IDs -128 to -1 / 128 to 255 in $8800 mode)
@@ -28,7 +29,8 @@ pub(super) fn render_vram_debug(
             let row_addr = tile_addr + (y_in_tile * 2);
 
             // Check VRAM bounds before reading the row
-            if row_addr < memory_map::VRAM_START || row_addr.wrapping_add(1) > memory_map::VRAM_END {
+            if row_addr < memory_map::VRAM_START || row_addr.wrapping_add(1) > memory_map::VRAM_END
+            {
                 // Tile address is out of VRAM range, fill with a default color?
                 for y_fill in 0..8 {
                     for x_fill in 0..8 {

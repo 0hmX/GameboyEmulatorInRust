@@ -2,13 +2,13 @@ use crate::memory_bus::MemoryBus;
 use crate::memory_map; // Use memory_map constants directly
 
 mod constants;
-mod state;
-mod render;
 mod debug;
+mod render;
+mod state;
 
 // Re-export public constants and types
-pub use constants::{GB_WIDTH, GB_HEIGHT, VRAM_DEBUG_WIDTH, VRAM_DEBUG_HEIGHT};
 use constants::*; // Use internal constants
+pub use constants::{GB_HEIGHT, GB_WIDTH, VRAM_DEBUG_HEIGHT, VRAM_DEBUG_WIDTH};
 use state::PpuState;
 
 /// Represents the Picture Processing Unit (PPU) of the Game Boy.
@@ -53,11 +53,14 @@ impl Ppu {
         // --- Check if LCD is enabled ---
         if (self.state.lcdc & (1 << LCDC_LCD_ENABLE)) == 0 {
             // LCD is off - reset state if not already reset
-            if self.state.dots != 0 || self.state.current_scanline != 0 || self.state.ppu_mode != HBLANK_MODE {
+            if self.state.dots != 0
+                || self.state.current_scanline != 0
+                || self.state.ppu_mode != HBLANK_MODE
+            {
                 self.state.reset_for_lcd_off();
                 // Write initial state to registers when LCD turns off
                 memory_bus.write_byte(memory_map::LY_ADDR, 0);
-                 // Preserve IE bits, force mode to 0 (HBLANK), clear coincidence flag
+                // Preserve IE bits, force mode to 0 (HBLANK), clear coincidence flag
                 let stat_to_write = (self.state.stat & 0b1111_1000) | HBLANK_MODE;
                 memory_bus.set_io_reg_direct(memory_map::STAT_ADDR, stat_to_write); // Use direct write if available to bypass PPU write checks
 
@@ -72,17 +75,19 @@ impl Ppu {
 
         // --- State transitions based on timing ---
         match self.state.ppu_mode {
-            OAM_SCAN_MODE => { // Mode 2
+            OAM_SCAN_MODE => {
+                // Mode 2
                 if self.state.dots >= MODE2_OAM_SCAN_DOTS {
                     self.state.dots -= MODE2_OAM_SCAN_DOTS;
                     self.state.ppu_mode = VRAM_READ_MODE; // Transition to Mode 3
                 }
             }
-            VRAM_READ_MODE => { // Mode 3
-                 // Mode 3 duration can vary slightly based on sprites, etc.
-                 // For simplicity, use the minimum duration. A more accurate PPU
-                 // might calculate the exact end point.
-                 if self.state.dots >= MODE3_VRAM_READ_DOTS {
+            VRAM_READ_MODE => {
+                // Mode 3
+                // Mode 3 duration can vary slightly based on sprites, etc.
+                // For simplicity, use the minimum duration. A more accurate PPU
+                // might calculate the exact end point.
+                if self.state.dots >= MODE3_VRAM_READ_DOTS {
                     self.state.dots -= MODE3_VRAM_READ_DOTS;
                     self.state.ppu_mode = HBLANK_MODE; // Transition to Mode 0
 
@@ -94,16 +99,17 @@ impl Ppu {
                         // Get a mutable slice for the current line
                         let line_buffer_slice = &mut self.frame_buffer[start_index..end_index];
                         // Convert slice to array reference (requires exact size match)
-                         if let Ok(line_buffer_array) = line_buffer_slice.try_into() {
-                             render::render_scanline(line_buffer_array, &self.state, memory_bus);
-                         } else {
-                             // Handle error: slice length didn't match array size (shouldn't happen here)
-                             log::error!("Failed to get line buffer slice for rendering!");
-                         }
+                        if let Ok(line_buffer_array) = line_buffer_slice.try_into() {
+                            render::render_scanline(line_buffer_array, &self.state, memory_bus);
+                        } else {
+                            // Handle error: slice length didn't match array size (shouldn't happen here)
+                            log::error!("Failed to get line buffer slice for rendering!");
+                        }
                     }
                 }
             }
-            HBLANK_MODE => { // Mode 0
+            HBLANK_MODE => {
+                // Mode 0
                 // Mode 0 ends when the total dots for the scanline are reached
                 if self.state.dots >= DOTS_PER_SCANLINE {
                     self.state.dots %= DOTS_PER_SCANLINE; // Keep leftover dots for next line
@@ -113,8 +119,8 @@ impl Ppu {
                     if self.state.current_scanline == GB_HEIGHT as u8 {
                         self.state.ppu_mode = VBLANK_MODE; // Transition to Mode 1
                         self.state.vblank_just_occurred = true; // Signal VBlank interrupt
-                        // Option: Render VRAM debug view once per frame here
-                        // self.update_vram_debug_buffer(memory_bus);
+                    // Option: Render VRAM debug view once per frame here
+                    // self.update_vram_debug_buffer(memory_bus);
                     } else {
                         // Start next visible line
                         self.state.ppu_mode = OAM_SCAN_MODE; // Transition back to Mode 2
@@ -123,8 +129,9 @@ impl Ppu {
                     memory_bus.set_io_reg_direct(memory_map::LY_ADDR, self.state.current_scanline);
                 }
             }
-            VBLANK_MODE => { // Mode 1
-                 if self.state.dots >= DOTS_PER_SCANLINE {
+            VBLANK_MODE => {
+                // Mode 1
+                if self.state.dots >= DOTS_PER_SCANLINE {
                     self.state.dots %= DOTS_PER_SCANLINE;
                     self.state.current_scanline += 1;
 
@@ -133,7 +140,7 @@ impl Ppu {
                         self.state.current_scanline = 0; // Wrap back to line 0
                         self.state.ppu_mode = OAM_SCAN_MODE; // Start frame over in Mode 2
                     }
-                     // Always update LY during VBlank
+                    // Always update LY during VBlank
                     memory_bus.set_io_reg_direct(memory_map::LY_ADDR, self.state.current_scanline);
                 }
             }
@@ -147,7 +154,6 @@ impl Ppu {
         // --- Handle Interrupt Requests ---
         self.check_and_request_interrupts(memory_bus);
     }
-
 
     /// Checks LYC=LY coincidence and updates the internal flag.
     fn check_lyc_coincidence(&mut self, memory_bus: &MemoryBus) {
@@ -164,14 +170,13 @@ impl Ppu {
         if self.state.lyc_eq_ly {
             new_stat |= 1 << STAT_LYC_EQ_LY_FLAG;
         }
-         // Bit 7 is always set (unused, reads as 1)
+        // Bit 7 is always set (unused, reads as 1)
         new_stat |= 0x80;
 
         // Write the updated STAT value (only if changed?)
         // Using direct write to avoid infinite loops if STAT write itself triggers PPU logic.
         memory_bus.set_io_reg_direct(memory_map::STAT_ADDR, new_stat);
     }
-
 
     /// Checks conditions for STAT and VBlank interrupts and requests them.
     fn check_and_request_interrupts(&mut self, memory_bus: &mut MemoryBus) {
@@ -211,7 +216,6 @@ impl Ppu {
         // Update the internal state of the STAT interrupt line for the next cycle's check
         self.state.stat_interrupt_line = stat_interrupt_now;
     }
-
 
     /// Helper to request an interrupt by setting the corresponding bit in the IF register.
     #[inline]

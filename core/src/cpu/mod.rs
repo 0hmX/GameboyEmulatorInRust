@@ -1,20 +1,23 @@
 //! The Sharp SM83 CPU core implementation.
 
-use crate::memory_map::{JOYPAD_INTERRUPT_BIT, LCD_STAT_INTERRUPT_BIT, SERIAL_INTERRUPT_BIT, TIMER_INTERRUPT_BIT, VBLANK_INTERRUPT_BIT};
+use crate::instruction::{CB_INSTRUCTIONS, INSTRUCTIONS};
 use crate::memory_bus::MemoryBus;
-use crate::instruction::{INSTRUCTIONS, CB_INSTRUCTIONS};
 use crate::memory_map; // Use qualified paths for memory map constants
+use crate::memory_map::{
+    JOYPAD_INTERRUPT_BIT, LCD_STAT_INTERRUPT_BIT, SERIAL_INTERRUPT_BIT, TIMER_INTERRUPT_BIT,
+    VBLANK_INTERRUPT_BIT,
+};
 use log;
 
 // Declare submodules
 mod constants;
-#[macro_use] mod ops_macros;
-mod ops_load;
+#[macro_use]
+mod ops_macros;
 mod ops_alu;
-mod ops_control;
-mod ops_rot_shift;
 mod ops_cb;
-
+mod ops_control;
+mod ops_load;
+mod ops_rot_shift;
 
 // Re-export public constants if needed by external modules
 pub use constants::*;
@@ -40,20 +43,20 @@ pub struct Cpu {
     pc: u16, // Program Counter
 
     // --- CPU State Flags ---
-    ime: bool,           // Interrupt Master Enable flag (enabled/disabled)
-    halted: bool,        // CPU is in HALT state (waiting for interrupt)
+    ime: bool,            // Interrupt Master Enable flag (enabled/disabled)
+    halted: bool,         // CPU is in HALT state (waiting for interrupt)
     stop_requested: bool, // CPU received STOP instruction (low power state)
-    ime_scheduled: bool, // IME will be enabled after the next instruction
+    ime_scheduled: bool,  // IME will be enabled after the next instruction
 
     // --- Internal Timing/Execution State ---
-    total_cycles: u64, // Total T-cycles executed since start/reset
-    fetched_opcode: u8, // Last opcode fetched (for error reporting/debugging)
+    total_cycles: u64,   // Total T-cycles executed since start/reset
+    fetched_opcode: u8,  // Last opcode fetched (for error reporting/debugging)
     instruction_pc: u16, // PC at the start of the current instruction (for reads/debugging)
 }
 
 // Core CPU logic (new, step, interrupts, helpers, accessors) remains here
 impl Cpu {
-     /// Creates a new CPU instance, optionally skipping the boot ROM sequence.
+    /// Creates a new CPU instance, optionally skipping the boot ROM sequence.
     pub fn new(skip_boot_rom: bool) -> Self {
         // Initial register values depend on whether the boot ROM is executed.
         // These values are set *after* the boot ROM finishes (if executed).
@@ -155,13 +158,13 @@ impl Cpu {
 
         // --- Halted/Stopped Phase ---
         if self.halted {
-             let ie = memory_bus.read_byte(memory_map::INTERRUPT_ENABLE_REGISTER);
-             let iflags = memory_bus.read_byte(memory_map::IF_ADDR);
-             if (ie & iflags & 0x1F) != 0 {
-                 self.halted = false;
-                 self.total_cycles = self.total_cycles.wrapping_add(4);
-                 return Ok(4); // Wake up takes 1 cycle (4 T-cycles)
-             }
+            let ie = memory_bus.read_byte(memory_map::INTERRUPT_ENABLE_REGISTER);
+            let iflags = memory_bus.read_byte(memory_map::IF_ADDR);
+            if (ie & iflags & 0x1F) != 0 {
+                self.halted = false;
+                self.total_cycles = self.total_cycles.wrapping_add(4);
+                return Ok(4); // Wake up takes 1 cycle (4 T-cycles)
+            }
         }
         if self.halted || self.stop_requested {
             self.total_cycles = self.total_cycles.wrapping_add(4);
@@ -190,7 +193,9 @@ impl Cpu {
                     instruction.cycles as u16
                 };
                 let total_instruction_cycles = base_cycles.wrapping_add(additional_cycles);
-                self.total_cycles = self.total_cycles.wrapping_add(total_instruction_cycles as u64);
+                self.total_cycles = self
+                    .total_cycles
+                    .wrapping_add(total_instruction_cycles as u64);
                 Ok(total_instruction_cycles)
             }
             Err(error_message) => {
@@ -200,7 +205,11 @@ impl Cpu {
                     self.fetched_opcode,
                     error_message
                 );
-                let base_cycles = if self.fetched_opcode == 0xCB { 4 } else { instruction.cycles as u16 };
+                let base_cycles = if self.fetched_opcode == 0xCB {
+                    4
+                } else {
+                    instruction.cycles as u16
+                };
                 self.total_cycles = self.total_cycles.wrapping_add(base_cycles as u64);
                 Err(format!(
                     "CPU Error at PC={:#06X} (Opcode {:#04X}): {}",
@@ -216,7 +225,9 @@ impl Cpu {
         let if_flags = memory_bus.read_byte(memory_map::IF_ADDR);
         let ie_flags = memory_bus.read_byte(memory_map::INTERRUPT_ENABLE_REGISTER);
         let pending = if_flags & ie_flags & 0x1F;
-        if pending == 0 { return 0; }
+        if pending == 0 {
+            return 0;
+        }
 
         self.ime = false;
         self.ime_scheduled = false;
@@ -232,7 +243,7 @@ impl Cpu {
         } else if pending & (1 << JOYPAD_INTERRUPT_BIT) != 0 {
             (JOYPAD_VECTOR, JOYPAD_INTERRUPT_BIT)
         } else {
-             unreachable!();
+            unreachable!();
         };
 
         let current_if = memory_bus.read_byte(memory_map::IF_ADDR);
@@ -281,31 +292,57 @@ impl Cpu {
 
     // --- Flag/Register Pair Helpers ---
     #[inline(always)]
-    fn get_af(&self) -> u16 { ((self.a as u16) << 8) | (self.f as u16) }
+    fn get_af(&self) -> u16 {
+        ((self.a as u16) << 8) | (self.f as u16)
+    }
     #[inline(always)]
     fn set_af(&mut self, value: u16) {
         self.a = (value >> 8) as u8;
         self.f = (value & 0x00F0) as u8;
     }
     #[inline(always)]
-    fn get_bc(&self) -> u16 { u16::from_le_bytes([self.c, self.b]) }
+    fn get_bc(&self) -> u16 {
+        u16::from_le_bytes([self.c, self.b])
+    }
     #[inline(always)]
-    fn set_bc(&mut self, value: u16) { let bytes = value.to_le_bytes(); self.c = bytes[0]; self.b = bytes[1]; }
+    fn set_bc(&mut self, value: u16) {
+        let bytes = value.to_le_bytes();
+        self.c = bytes[0];
+        self.b = bytes[1];
+    }
     #[inline(always)]
-    fn get_de(&self) -> u16 { u16::from_le_bytes([self.e, self.d]) }
+    fn get_de(&self) -> u16 {
+        u16::from_le_bytes([self.e, self.d])
+    }
     #[inline(always)]
-    fn set_de(&mut self, value: u16) { let bytes = value.to_le_bytes(); self.e = bytes[0]; self.d = bytes[1]; }
+    fn set_de(&mut self, value: u16) {
+        let bytes = value.to_le_bytes();
+        self.e = bytes[0];
+        self.d = bytes[1];
+    }
     #[inline(always)]
-    fn get_hl(&self) -> u16 { u16::from_le_bytes([self.l, self.h]) }
+    fn get_hl(&self) -> u16 {
+        u16::from_le_bytes([self.l, self.h])
+    }
     #[inline(always)]
-    fn set_hl(&mut self, value: u16) { let bytes = value.to_le_bytes(); self.l = bytes[0]; self.h = bytes[1]; }
+    fn set_hl(&mut self, value: u16) {
+        let bytes = value.to_le_bytes();
+        self.l = bytes[0];
+        self.h = bytes[1];
+    }
     #[inline(always)]
     fn set_flag(&mut self, flag_mask: u8, set: bool) {
-        if set { self.f |= flag_mask; } else { self.f &= !flag_mask; }
+        if set {
+            self.f |= flag_mask;
+        } else {
+            self.f &= !flag_mask;
+        }
         self.f &= 0xF0;
     }
     #[inline(always)]
-    fn get_flag(&self, flag_mask: u8) -> bool { (self.f & flag_mask) != 0 }
+    fn get_flag(&self, flag_mask: u8) -> bool {
+        (self.f & flag_mask) != 0
+    }
 
     // --- ALU and Bit Operation Helpers ---
     // (Keep these internal helpers within the main impl block)
@@ -333,7 +370,11 @@ impl Cpu {
         self.set_flag(FLAG_C, carry);
     }
     fn add_a(&mut self, value: u8, use_carry: bool) {
-        let carry_in = if use_carry && self.get_flag(FLAG_C) { 1 } else { 0 };
+        let carry_in = if use_carry && self.get_flag(FLAG_C) {
+            1
+        } else {
+            0
+        };
         let (res1, c1) = self.a.overflowing_add(value);
         let (result, c2) = res1.overflowing_add(carry_in);
         let carry_out = c1 || c2;
@@ -344,8 +385,12 @@ impl Cpu {
         self.set_flag(FLAG_H, half_carry);
         self.set_flag(FLAG_C, carry_out);
     }
-     fn sub_a(&mut self, value: u8, use_carry: bool) {
-        let carry_in = if use_carry && self.get_flag(FLAG_C) { 1 } else { 0 };
+    fn sub_a(&mut self, value: u8, use_carry: bool) {
+        let carry_in = if use_carry && self.get_flag(FLAG_C) {
+            1
+        } else {
+            0
+        };
         let (res1, b1) = self.a.overflowing_sub(value);
         let (result, b2) = res1.overflowing_sub(carry_in);
         let borrow_out = b1 || b2;
@@ -455,41 +500,64 @@ impl Cpu {
         let h_flag = self.get_flag(FLAG_H);
         let c_flag = self.get_flag(FLAG_C);
         if !n_flag {
-            if c_flag || self.a > 0x99 { adjustment |= 0x60; set_carry = true; }
-            if h_flag || (self.a & 0x0F) > 0x09 { adjustment |= 0x06; }
+            if c_flag || self.a > 0x99 {
+                adjustment |= 0x60;
+                set_carry = true;
+            }
+            if h_flag || (self.a & 0x0F) > 0x09 {
+                adjustment |= 0x06;
+            }
             self.a = self.a.wrapping_add(adjustment);
         } else {
-            if c_flag { adjustment |= 0x60; set_carry = true; }
-            if h_flag { adjustment |= 0x06; }
-             self.a = self.a.wrapping_sub(adjustment);
+            if c_flag {
+                adjustment |= 0x60;
+                set_carry = true;
+            }
+            if h_flag {
+                adjustment |= 0x06;
+            }
+            self.a = self.a.wrapping_sub(adjustment);
         }
         self.set_flag(FLAG_Z, self.a == 0);
         self.set_flag(FLAG_H, false);
         self.set_flag(FLAG_C, set_carry);
     }
 
-
     // --- Public accessors ---
     #[inline(always)]
-    pub fn pc(&self) -> u16 { self.pc }
-    #[inline(always)]
-    pub fn sp(&self) -> u16 { self.sp }
-    #[inline(always)]
-    pub fn registers(&self) -> (u8, u8, u8, u8, u8, u8, u8, u8) {
-        (self.a, self.f, self.b, self.c, self.d, self.e, self.h, self.l)
+    pub fn pc(&self) -> u16 {
+        self.pc
     }
     #[inline(always)]
-    pub fn ime(&self) -> bool { self.ime }
+    pub fn sp(&self) -> u16 {
+        self.sp
+    }
     #[inline(always)]
-    pub fn halted(&self) -> bool { self.halted }
+    pub fn registers(&self) -> (u8, u8, u8, u8, u8, u8, u8, u8) {
+        (
+            self.a, self.f, self.b, self.c, self.d, self.e, self.h, self.l,
+        )
+    }
     #[inline(always)]
-    pub fn stopped(&self) -> bool { self.stop_requested }
+    pub fn ime(&self) -> bool {
+        self.ime
+    }
     #[inline(always)]
-    pub fn total_cycles(&self) -> u64 { self.total_cycles }
+    pub fn halted(&self) -> bool {
+        self.halted
+    }
+    #[inline(always)]
+    pub fn stopped(&self) -> bool {
+        self.stop_requested
+    }
+    #[inline(always)]
+    pub fn total_cycles(&self) -> u64 {
+        self.total_cycles
+    }
 
     // --- Debugging Helpers ---
     pub fn disassemble_instruction(&self, address: u16, bus: &MemoryBus) -> (String, u8) {
-       let opcode = bus.read_byte(address);
+        let opcode = bus.read_byte(address);
         if opcode == 0xCB {
             let cb_opcode = bus.read_byte(address.wrapping_add(1));
             if let Some(cb_instr) = CB_INSTRUCTIONS.get(cb_opcode as usize) {
@@ -499,30 +567,37 @@ impl Cpu {
             }
         } else {
             if let Some(instr) = INSTRUCTIONS.get(opcode as usize) {
-                 let operand_str = match instr.length {
+                let operand_str = match instr.length {
                     1 => "".to_string(),
                     2 => {
                         let d8 = bus.read_byte(address.wrapping_add(1));
-                        if instr.mnemonic.starts_with("JR") || instr.mnemonic == "ADD SP, r8" || instr.mnemonic == "LD HL, SP+r8" {
-                             format!(" ${:+}", d8 as i8)
-                        } else { format!(" ${:02X}", d8) }
-                    },
+                        if instr.mnemonic.starts_with("JR")
+                            || instr.mnemonic == "ADD SP, r8"
+                            || instr.mnemonic == "LD HL, SP+r8"
+                        {
+                            format!(" ${:+}", d8 as i8)
+                        } else {
+                            format!(" ${:02X}", d8)
+                        }
+                    }
                     3 => {
                         let lo = bus.read_byte(address.wrapping_add(1));
                         let hi = bus.read_byte(address.wrapping_add(2));
                         format!(" ${:04X}", u16::from_le_bytes([lo, hi]))
-                    },
+                    }
                     _ => "".to_string(),
                 };
-                let formatted_mnemonic = instr.mnemonic
+                let formatted_mnemonic = instr
+                    .mnemonic
                     .replace("d16", &operand_str)
                     .replace("a16", &operand_str)
                     .replace("d8", &operand_str)
                     .replace("r8", &operand_str)
-                    .trim_end().to_string();
+                    .trim_end()
+                    .to_string();
                 (formatted_mnemonic, instr.length)
             } else {
-                 (format!("DB {:02X}", opcode), 1)
+                (format!("DB {:02X}", opcode), 1)
             }
         }
     }

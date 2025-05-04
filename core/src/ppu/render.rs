@@ -72,9 +72,10 @@ pub(super) fn render_scanline(
             for sprite in &sprites {
                 // Is this sprite horizontally covering the current pixel 'x'?
                 let effective_x = sprite.x_pos.wrapping_sub(8);
-                 if x >= effective_x && x < effective_x.wrapping_add(8) {
+                if x >= effective_x && x < effective_x.wrapping_add(8) {
                     // Check horizontal position only once per sprite
-                    if sprite.x_pos < best_sprite_x { // Lower X wins priority
+                    if sprite.x_pos < best_sprite_x {
+                        // Lower X wins priority
                         // Calculate pixel within this potentially winning sprite
                         let col_in_tile = if sprite.x_flip {
                             7 - (x - effective_x)
@@ -82,9 +83,11 @@ pub(super) fn render_scanline(
                             x - effective_x
                         };
 
-                         let sprite_pixel_idx = get_sprite_tile_pixel_index(sprite, col_in_tile, memory_bus);
+                        let sprite_pixel_idx =
+                            get_sprite_tile_pixel_index(sprite, col_in_tile, memory_bus);
 
-                        if sprite_pixel_idx != 0 { // Only consider non-transparent pixels
+                        if sprite_pixel_idx != 0 {
+                            // Only consider non-transparent pixels
                             // This sprite is visible and potentially the winner
                             winning_sprite_pixel_idx = sprite_pixel_idx;
                             winning_sprite_palette = sprite.palette_reg_value;
@@ -93,12 +96,13 @@ pub(super) fn render_scanline(
                             sprite_found = true;
                         }
                     }
-                 }
+                }
             } // End of sprite loop for this pixel
 
             // If a visible sprite was found for this pixel, apply priority logic
             if sprite_found {
-                let sprite_color = get_color_from_palette(winning_sprite_pixel_idx, winning_sprite_palette);
+                let sprite_color =
+                    get_color_from_palette(winning_sprite_pixel_idx, winning_sprite_palette);
                 let bg_win_is_transparent = bg_win_pixel_idx == 0;
 
                 // Condition: Sprite is drawn if...
@@ -124,7 +128,6 @@ pub(super) fn get_color_from_palette(pixel_index: u8, palette_reg: u8) -> u8 {
     // Extracts the 2-bit color specified by index from the 8-bit palette register
     (palette_reg >> (pixel_index * 2)) & 0b11
 }
-
 
 /// Fetches the raw pixel index (0-3) for the background at screen coordinates (x, y).
 #[inline]
@@ -230,7 +233,7 @@ fn calculate_tile_data_addr(tile_id: u8, lcdc: u8, _memory_bus: &MemoryBus) -> u
 /// Reads the two bytes for a tile row and extracts the pixel index (0-3) for a given column.
 #[inline]
 fn get_tile_row_pixel_index(row_addr: u16, col_in_tile: u8, memory_bus: &MemoryBus) -> u8 {
-     // Check VRAM bounds before reading
+    // Check VRAM bounds before reading
     if row_addr < memory_map::VRAM_START || row_addr.wrapping_add(1) > memory_map::VRAM_END {
         return 0; // Return transparent if address is invalid
     }
@@ -244,15 +247,14 @@ fn get_tile_row_pixel_index(row_addr: u16, col_in_tile: u8, memory_bus: &MemoryB
     (bit2 << 1) | bit1 // Combine bits: bit2 is MSB, bit1 is LSB
 }
 
-
 // --- Sprite Fetching ---
 
 /// Represents the relevant data for a sprite potentially visible on the current scanline.
 #[derive(Debug)]
 struct SpriteInfo {
     oam_index: u8,
-    y_pos: u8, // OAM Y value (screen Y + 16)
-    x_pos: u8, // OAM X value (screen X + 8)
+    y_pos: u8,      // OAM Y value (screen Y + 16)
+    x_pos: u8,      // OAM X value (screen X + 8)
     tile_index: u8, // Base tile index
     attributes: u8,
     // Pre-calculated attributes for rendering:
@@ -268,34 +270,44 @@ struct SpriteInfo {
 fn fetch_scanline_sprites(state: &PpuState, memory_bus: &MemoryBus) -> Vec<SpriteInfo> {
     let mut visible_sprites = Vec::with_capacity(10);
     let current_y = state.current_scanline;
-    let sprite_height = if (state.lcdc & (1 << LCDC_OBJ_SIZE)) != 0 { 16 } else { 8 };
+    let sprite_height = if (state.lcdc & (1 << LCDC_OBJ_SIZE)) != 0 {
+        16
+    } else {
+        8
+    };
 
     // Read OBP0 and OBP1 once
     let obp0 = memory_bus.read_byte(memory_map::OBP0_ADDR);
     let obp1 = memory_bus.read_byte(memory_map::OBP1_ADDR);
 
-    for i in 0..40 { // Iterate through all 40 OAM entries
+    for i in 0..40 {
+        // Iterate through all 40 OAM entries
         let oam_addr = memory_map::OAM_START + (i * 4);
-        let sprite_y = memory_bus.read_byte(oam_addr);     // Y pos + 16
+        let sprite_y = memory_bus.read_byte(oam_addr); // Y pos + 16
         let sprite_x = memory_bus.read_byte(oam_addr + 1); // X pos + 8
 
         // Check basic visibility conditions (on-screen position)
-        if sprite_x == 0 || sprite_x >= (GB_WIDTH as u8 + 8) { continue; } // Off-screen horizontally
-        if sprite_y == 0 || sprite_y >= (GB_HEIGHT as u8 + 16) { continue; } // Off-screen vertically (using OAM value)
+        if sprite_x == 0 || sprite_x >= (GB_WIDTH as u8 + 8) {
+            continue;
+        } // Off-screen horizontally
+        if sprite_y == 0 || sprite_y >= (GB_HEIGHT as u8 + 16) {
+            continue;
+        } // Off-screen vertically (using OAM value)
 
         // Check vertical intersection with current scanline
         let effective_y = sprite_y.wrapping_sub(16); // Screen Y coordinate of top edge
         if current_y >= effective_y && current_y < effective_y.wrapping_add(sprite_height) {
             // This sprite intersects the current scanline
 
-            if visible_sprites.len() < 10 { // Hardware limit: max 10 sprites per scanline
-                 let tile_index = memory_bus.read_byte(oam_addr + 2);
-                 let attributes = memory_bus.read_byte(oam_addr + 3);
+            if visible_sprites.len() < 10 {
+                // Hardware limit: max 10 sprites per scanline
+                let tile_index = memory_bus.read_byte(oam_addr + 2);
+                let attributes = memory_bus.read_byte(oam_addr + 3);
 
-                 let palette_num = (attributes >> OAM_PALETTE_NUM_DMG) & 1;
-                 let palette_reg_value = if palette_num == 0 { obp0 } else { obp1 };
+                let palette_num = (attributes >> OAM_PALETTE_NUM_DMG) & 1;
+                let palette_reg_value = if palette_num == 0 { obp0 } else { obp1 };
 
-                 visible_sprites.push(SpriteInfo {
+                visible_sprites.push(SpriteInfo {
                     oam_index: i as u8,
                     y_pos: sprite_y,
                     x_pos: sprite_x,
@@ -308,7 +320,7 @@ fn fetch_scanline_sprites(state: &PpuState, memory_bus: &MemoryBus) -> Vec<Sprit
                     bg_priority: (attributes & (1 << OAM_BG_WIN_PRIORITY)) != 0,
                 });
             } else {
-                 break; // Stop searching once 10 sprites are found
+                break; // Stop searching once 10 sprites are found
             }
         }
     }
@@ -316,12 +328,13 @@ fn fetch_scanline_sprites(state: &PpuState, memory_bus: &MemoryBus) -> Vec<Sprit
     // Sort the found sprites by X-coordinate (ascending), then OAM index (ascending)
     // This ensures correct rendering priority for overlapping sprites at the same X.
     visible_sprites.sort_unstable_by(|a, b| {
-        a.x_pos.cmp(&b.x_pos).then_with(|| a.oam_index.cmp(&b.oam_index))
+        a.x_pos
+            .cmp(&b.x_pos)
+            .then_with(|| a.oam_index.cmp(&b.oam_index))
     });
 
     visible_sprites
 }
-
 
 /// Calculates the pixel index (0-3) within a specific sprite's tile data.
 #[inline]
@@ -330,7 +343,6 @@ fn get_sprite_tile_pixel_index(
     col_in_tile: u8, // Column within the 8x8 pattern (0-7, already adjusted for x-flip)
     memory_bus: &MemoryBus,
 ) -> u8 {
-
     // Calculate the row within the tile pattern (adjusting for y-flip and height)
     let current_y = memory_bus.read_byte(memory_map::LY_ADDR); // Read LY for current scanline
     let effective_y = sprite.y_pos.wrapping_sub(16); // Screen Y coordinate of top edge
@@ -342,7 +354,11 @@ fn get_sprite_tile_pixel_index(
 
     // Determine the actual tile index and adjust row for 8x16 sprites
     let actual_tile_index = if sprite.height == 16 {
-        if row_in_sprite < 8 { sprite.tile_index & 0xFE } else { sprite.tile_index | 0x01 }
+        if row_in_sprite < 8 {
+            sprite.tile_index & 0xFE
+        } else {
+            sprite.tile_index | 0x01
+        }
     } else {
         sprite.tile_index
     };

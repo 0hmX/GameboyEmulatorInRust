@@ -29,7 +29,7 @@ impl Joypad {
             // P1 defaults to 0xCF (often, depends post-bootrom),
             // means bits 4 and 5 are high (no selection) initially.
             // Store only the writable bits 4,5.
-             p1_register_selection: 0x30,
+            p1_register_selection: 0x30,
         }
     }
 
@@ -39,17 +39,33 @@ impl Joypad {
 
         if self.p1_register_selection & 0x20 == 0 {
             // Bit 5 Low: Select Action buttons (A, B, Select, Start)
-            if self.state.a { joypad_value &= 0b1110; } // Bit 0 low if pressed
-            if self.state.b { joypad_value &= 0b1101; } // Bit 1 low if pressed
-            if self.state.select { joypad_value &= 0b1011; } // Bit 2 low if pressed
-            if self.state.start { joypad_value &= 0b0111; } // Bit 3 low if pressed
+            if self.state.a {
+                joypad_value &= 0b1110;
+            } // Bit 0 low if pressed
+            if self.state.b {
+                joypad_value &= 0b1101;
+            } // Bit 1 low if pressed
+            if self.state.select {
+                joypad_value &= 0b1011;
+            } // Bit 2 low if pressed
+            if self.state.start {
+                joypad_value &= 0b0111;
+            } // Bit 3 low if pressed
         }
         if self.p1_register_selection & 0x10 == 0 {
-             // Bit 4 Low: Select Direction buttons (Right, Left, Up, Down)
-            if self.state.right { joypad_value &= 0b1110; } // Bit 0 low if pressed
-            if self.state.left { joypad_value &= 0b1101; } // Bit 1 low if pressed
-            if self.state.up { joypad_value &= 0b1011; } // Bit 2 low if pressed
-            if self.state.down { joypad_value &= 0b0111; } // Bit 3 low if pressed
+            // Bit 4 Low: Select Direction buttons (Right, Left, Up, Down)
+            if self.state.right {
+                joypad_value &= 0b1110;
+            } // Bit 0 low if pressed
+            if self.state.left {
+                joypad_value &= 0b1101;
+            } // Bit 1 low if pressed
+            if self.state.up {
+                joypad_value &= 0b1011;
+            } // Bit 2 low if pressed
+            if self.state.down {
+                joypad_value &= 0b0111;
+            } // Bit 3 low if pressed
         }
 
         // Combine input bits (0-3) with selection bits (4-5) and unused high bits (reads 1)
@@ -70,37 +86,82 @@ impl Joypad {
         match key {
             // Directions (Check bit 4 of P1 register selection)
             Keycode::Right | Keycode::D => {
-                if !self.state.right { button_newly_pressed = true; self.state.right = true; }
-                if self.p1_register_selection & 0x10 == 0 { selection_active = true; }
+                if !self.state.right {
+                    button_newly_pressed = true;
+                    self.state.right = true;
+                }
+                if self.p1_register_selection & 0x10 == 0 {
+                    selection_active = true;
+                }
             }
-            Keycode::Left | Keycode::A => { // Remap 'A' key to Left
-                if !self.state.left { button_newly_pressed = true; self.state.left = true; }
-                if self.p1_register_selection & 0x10 == 0 { selection_active = true; }
+            Keycode::Left | Keycode::A => {
+                // Remap 'A' key to Left
+                if !self.state.left {
+                    button_newly_pressed = true;
+                    self.state.left = true;
+                }
+                if self.p1_register_selection & 0x10 == 0 {
+                    selection_active = true;
+                }
             }
             Keycode::Up | Keycode::W => {
-                if !self.state.up { button_newly_pressed = true; self.state.up = true; }
-                if self.p1_register_selection & 0x10 == 0 { selection_active = true; }
+                if !self.state.up {
+                    button_newly_pressed = true;
+                    self.state.up = true;
+                }
+                if self.p1_register_selection & 0x10 == 0 {
+                    selection_active = true;
+                }
             }
             Keycode::Down | Keycode::S => {
-                if !self.state.down { button_newly_pressed = true; self.state.down = true; }
-                if self.p1_register_selection & 0x10 == 0 { selection_active = true; }
+                if !self.state.down {
+                    button_newly_pressed = true;
+                    self.state.down = true;
+                }
+                if self.p1_register_selection & 0x10 == 0 {
+                    selection_active = true;
+                }
             }
             // Actions (Check bit 5 of P1 register selection)
-            Keycode::Z | Keycode::J => { // GB 'A' button
-                if !self.state.a { button_newly_pressed = true; self.state.a = true; }
-                if self.p1_register_selection & 0x20 == 0 { selection_active = true; }
+            Keycode::Z | Keycode::J => {
+                // GB 'A' button
+                if !self.state.a {
+                    button_newly_pressed = true;
+                    self.state.a = true;
+                }
+                if self.p1_register_selection & 0x20 == 0 {
+                    selection_active = true;
+                }
             }
-            Keycode::X | Keycode::K => { // GB 'B' button
-                if !self.state.b { button_newly_pressed = true; self.state.b = true; }
-                if self.p1_register_selection & 0x20 == 0 { selection_active = true; }
+            Keycode::X | Keycode::K => {
+                // GB 'B' button
+                if !self.state.b {
+                    button_newly_pressed = true;
+                    self.state.b = true;
+                }
+                if self.p1_register_selection & 0x20 == 0 {
+                    selection_active = true;
+                }
             }
-            Keycode::Backspace | Keycode::RShift => { // GB 'Select' button
-                if !self.state.select { button_newly_pressed = true; self.state.select = true; }
-                if self.p1_register_selection & 0x20 == 0 { selection_active = true; }
+            Keycode::Backspace | Keycode::RShift => {
+                // GB 'Select' button
+                if !self.state.select {
+                    button_newly_pressed = true;
+                    self.state.select = true;
+                }
+                if self.p1_register_selection & 0x20 == 0 {
+                    selection_active = true;
+                }
             }
-            Keycode::Return | Keycode::Space => { // GB 'Start' button
-                if !self.state.start { button_newly_pressed = true; self.state.start = true; }
-                if self.p1_register_selection & 0x20 == 0 { selection_active = true; }
+            Keycode::Return | Keycode::Space => {
+                // GB 'Start' button
+                if !self.state.start {
+                    button_newly_pressed = true;
+                    self.state.start = true;
+                }
+                if self.p1_register_selection & 0x20 == 0 {
+                    selection_active = true;
+                }
             }
             _ => {} // Ignore other keys
         }
@@ -111,7 +172,7 @@ impl Joypad {
     }
 
     /// Handles a key release event.
-     pub fn key_up(&mut self, key: Keycode) {
+    pub fn key_up(&mut self, key: Keycode) {
         match key {
             Keycode::Right | Keycode::D => self.state.right = false,
             Keycode::Left | Keycode::A => self.state.left = false,

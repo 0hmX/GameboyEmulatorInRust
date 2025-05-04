@@ -119,7 +119,7 @@ impl MemoryBus {
             mbc1_rom_bank_lower: 1,
             mbc1_bank_upper: 0,
 
-            rtc: RtcRegisters::new(), // Use constructor
+            rtc: RtcRegisters::new(),             // Use constructor
             rtc_latched: RtcRegisters::default(), // Will be cloned on latch
             rtc_latch_state: 0,
             rtc_mapped_register: 0,
@@ -149,8 +149,7 @@ impl MemoryBus {
         let ram_size_code = rom_data[0x0149];
 
         // Determine MBC Type, RAM, Battery using MbcType helper
-        (self.mbc_type, self.has_ram, self.has_battery) =
-            MbcType::from_header(cartridge_type_code);
+        (self.mbc_type, self.has_ram, self.has_battery) = MbcType::from_header(cartridge_type_code);
 
         // Determine ROM size and number of banks
         self.num_rom_banks = match rom_size_code {
@@ -169,7 +168,7 @@ impl MemoryBus {
             );
         }
         if rom_data.len() > expected_rom_size {
-             println!(
+            println!(
                 "Info: ROM file size ({}) is larger than expected ({}) based on header. Extra data might be ignored.",
                 rom_data.len(),
                 expected_rom_size
@@ -196,12 +195,13 @@ impl MemoryBus {
             // Decide how to handle: trust type or trust size? Let's trust type for now.
             // self.has_ram = true; // Option: trust size code
         }
-        if ram_size == 0 && self.has_ram && self.mbc_type != MbcType::Mbc3 { // MBC3 might have RTC only
+        if ram_size == 0 && self.has_ram && self.mbc_type != MbcType::Mbc3 {
+            // MBC3 might have RTC only
             println!(
                 "Warning: Cartridge header RAM size 00, but type {:02X} usually expects RAM.",
                 cartridge_type_code
             );
-             // self.has_ram = false; // Option: trust size code
+            // self.has_ram = false; // Option: trust size code
         }
 
         // Store ROM data
@@ -290,15 +290,16 @@ impl MemoryBus {
 
     // --- Read/Write ---
 
-    pub fn read_byte(&self, addr: u16) -> u8 { // Make mutable for RTC latch read side-effect
+    pub fn read_byte(&self, addr: u16) -> u8 {
+        // Make mutable for RTC latch read side-effect
         match addr {
             // ROM Bank 0 (Fixed)
             ROM_BANK_0_START..=ROM_BANK_0_END => self.rom_bank_0[addr as usize],
             // ROM Bank N (Switchable)
             ROM_BANK_N_START..=ROM_BANK_N_END => {
                 let effective_rom_bank = self.current_rom_bank % self.num_rom_banks.max(1);
-                let rom_offset = (effective_rom_bank * ROM_BANK_N_SIZE)
-                    + (addr - ROM_BANK_N_START) as usize;
+                let rom_offset =
+                    (effective_rom_bank * ROM_BANK_N_SIZE) + (addr - ROM_BANK_N_START) as usize;
                 if rom_offset < self.full_rom_data.len() {
                     self.full_rom_data[rom_offset]
                 } else {
@@ -322,13 +323,15 @@ impl MemoryBus {
                         // Reading latched RTC register
                         self.rtc_latched.read(self.rtc_mapped_register)
                     }
-                    _ => { // Includes NoMbc RAM, Mbc1 RAM, and Mbc3 RAM access
-                        if !self.has_ram || self.external_ram.is_empty() || self.num_ram_banks == 0 {
+                    _ => {
+                        // Includes NoMbc RAM, Mbc1 RAM, and Mbc3 RAM access
+                        if !self.has_ram || self.external_ram.is_empty() || self.num_ram_banks == 0
+                        {
                             return 0xFF;
                         }
                         let effective_ram_bank = self.current_ram_bank % self.num_ram_banks;
-                        let ram_offset = (effective_ram_bank * EXT_RAM_SIZE)
-                            + (addr - EXT_RAM_START) as usize;
+                        let ram_offset =
+                            (effective_ram_bank * EXT_RAM_SIZE) + (addr - EXT_RAM_START) as usize;
                         if ram_offset < self.external_ram.len() {
                             self.external_ram[ram_offset]
                         } else {
@@ -349,7 +352,7 @@ impl MemoryBus {
             ECHO_RAM_START..=ECHO_RAM_END => self.read_byte(addr - 0x2000),
             // OAM
             OAM_START..=OAM_END => {
-                 // TODO: Proper PPU mode checking
+                // TODO: Proper PPU mode checking
                 self.oam[(addr - OAM_START) as usize]
             }
             // Not Usable Area
@@ -382,7 +385,8 @@ impl MemoryBus {
     pub fn write_byte(&mut self, addr: u16, value: u8) {
         match addr {
             // --- MBC Control Registers ---
-            0x0000..=0x1FFF => { // RAM/RTC Enable
+            0x0000..=0x1FFF => {
+                // RAM/RTC Enable
                 match self.mbc_type {
                     MbcType::Mbc1 | MbcType::Mbc3 => {
                         // Only enable if cart has RAM or it's MBC3 (for RTC)
@@ -393,7 +397,8 @@ impl MemoryBus {
                     _ => {}
                 }
             }
-            0x2000..=0x3FFF => { // ROM Bank Number (Lower)
+            0x2000..=0x3FFF => {
+                // ROM Bank Number (Lower)
                 match self.mbc_type {
                     MbcType::Mbc1 => {
                         let bank_low = value & 0x1F;
@@ -408,7 +413,8 @@ impl MemoryBus {
                     _ => {}
                 }
             }
-            0x4000..=0x5FFF => { // RAM Bank / ROM Bank Upper (MBC1) / RTC Select (MBC3)
+            0x4000..=0x5FFF => {
+                // RAM Bank / ROM Bank Upper (MBC1) / RTC Select (MBC3)
                 match self.mbc_type {
                     MbcType::Mbc1 => {
                         self.mbc1_bank_upper = value & 0x03;
@@ -416,22 +422,26 @@ impl MemoryBus {
                         self.update_mbc1_ram_bank();
                     }
                     MbcType::Mbc3 => {
-                        if value <= 0x07 { // Select RAM Bank 0-x
+                        if value <= 0x07 {
+                            // Select RAM Bank 0-x
                             self.current_ram_bank = value as usize;
                             self.rtc_mapped_register = 0; // Indicate RAM selected
-                             if self.num_ram_banks > 0 {
+                            if self.num_ram_banks > 0 {
                                 self.current_ram_bank &= self.num_ram_banks - 1;
                             } else {
                                 self.current_ram_bank = 0;
                             }
-                        } else if (0x08..=0x0C).contains(&value) { // Select RTC Register
+                        } else if (0x08..=0x0C).contains(&value) {
+                            // Select RTC Register
                             self.rtc_mapped_register = value;
-                        } else { /* Invalid */ }
+                        } else { /* Invalid */
+                        }
                     }
                     _ => {}
                 }
             }
-            0x6000..=0x7FFF => { // Banking Mode (MBC1) / Latch RTC (MBC3)
+            0x6000..=0x7FFF => {
+                // Banking Mode (MBC1) / Latch RTC (MBC3)
                 match self.mbc_type {
                     MbcType::Mbc1 => {
                         self.banking_mode = value & 0x01;
@@ -460,17 +470,23 @@ impl MemoryBus {
                 self.vram[(addr - VRAM_START) as usize] = value;
             }
             EXT_RAM_START..=EXT_RAM_END => {
-                if !self.ram_enabled { return; }
+                if !self.ram_enabled {
+                    return;
+                }
                 match self.mbc_type {
                     MbcType::Mbc3 if self.rtc_mapped_register >= 0x08 => {
                         // Writing to live RTC register
                         self.rtc.write(self.rtc_mapped_register, value);
                     }
-                    _ => { // RAM access
-                        if !self.has_ram || self.external_ram.is_empty() || self.num_ram_banks == 0 { return; }
-                         let effective_ram_bank = self.current_ram_bank % self.num_ram_banks;
-                        let ram_offset = (effective_ram_bank * EXT_RAM_SIZE)
-                            + (addr - EXT_RAM_START) as usize;
+                    _ => {
+                        // RAM access
+                        if !self.has_ram || self.external_ram.is_empty() || self.num_ram_banks == 0
+                        {
+                            return;
+                        }
+                        let effective_ram_bank = self.current_ram_bank % self.num_ram_banks;
+                        let ram_offset =
+                            (effective_ram_bank * EXT_RAM_SIZE) + (addr - EXT_RAM_START) as usize;
                         if ram_offset < self.external_ram.len() {
                             self.external_ram[ram_offset] = value;
                         }
@@ -502,35 +518,39 @@ impl MemoryBus {
                         self.io_registers[offset] = value;
                     }
                     IF_ADDR => {
-                         // Bits 0-4 are R/W, bits 5-7 are unused (read as 1)
-                         // Writing 1 to a flag bit *requests* it clear (unlike hardware where it clears directly)
-                         // The CPU interrupt handling logic should clear flags after servicing.
-                         // For direct writes (e.g. game code), allow writing 0 or 1 to flags.
-                         // Let's preserve upper bits on write.
-                        self.io_registers[offset] = (value & 0x1F) | (self.io_registers[offset] & 0xE0);
+                        // Bits 0-4 are R/W, bits 5-7 are unused (read as 1)
+                        // Writing 1 to a flag bit *requests* it clear (unlike hardware where it clears directly)
+                        // The CPU interrupt handling logic should clear flags after servicing.
+                        // For direct writes (e.g. game code), allow writing 0 or 1 to flags.
+                        // Let's preserve upper bits on write.
+                        self.io_registers[offset] =
+                            (value & 0x1F) | (self.io_registers[offset] & 0xE0);
                     }
-                    LCDC_ADDR | STAT_ADDR | SCY_ADDR | SCX_ADDR | LYC_ADDR | BGP_ADDR |
-                    OBP0_ADDR | OBP1_ADDR | WY_ADDR | WX_ADDR => {
+                    LCDC_ADDR | STAT_ADDR | SCY_ADDR | SCX_ADDR | LYC_ADDR | BGP_ADDR
+                    | OBP0_ADDR | OBP1_ADDR | WY_ADDR | WX_ADDR => {
                         // TODO: Notify PPU component
                         self.io_registers[offset] = value;
                         if addr == STAT_ADDR {
-                             // Preserve read-only bits (lower 3, mode flags)
-                             // Only bits 3-6 (interrupt enables) are writable
-                             // Bit 7 is always 1 (read).
-                             // Let PPU manage bits 0,1,2. We only write bits 3-6 here.
-                             self.io_registers[offset] = (value & 0b0111_1000) | (self.io_registers[offset] & 0b1000_0111);
+                            // Preserve read-only bits (lower 3, mode flags)
+                            // Only bits 3-6 (interrupt enables) are writable
+                            // Bit 7 is always 1 (read).
+                            // Let PPU manage bits 0,1,2. We only write bits 3-6 here.
+                            self.io_registers[offset] =
+                                (value & 0b0111_1000) | (self.io_registers[offset] & 0b1000_0111);
                         }
                     }
                     DMA_ADDR => {
                         self.io_registers[offset] = value;
                         self.perform_dma_transfer(value);
                     }
-                     0xFF10..=0xFF26 | 0xFF30..=0xFF3F => { // Sound Regs
-                         // TODO: Notify APU component
-                         self.io_registers[offset] = value;
-                         // Some sound regs have write side effects (e.g., Trigger bit)
-                     }
-                    _ => { // Default write for unhandled/simple IO regs
+                    0xFF10..=0xFF26 | 0xFF30..=0xFF3F => {
+                        // Sound Regs
+                        // TODO: Notify APU component
+                        self.io_registers[offset] = value;
+                        // Some sound regs have write side effects (e.g., Trigger bit)
+                    }
+                    _ => {
+                        // Default write for unhandled/simple IO regs
                         self.io_registers[offset] = value;
                     }
                 }
@@ -550,11 +570,14 @@ impl MemoryBus {
         // This simplified version performs the copy instantly.
         let source_start_addr = (source_high_byte as u16) << 8;
         if source_start_addr >= 0xFE00 {
-             // DMA from OAM/IO/HRAM/IE is often restricted or has weird behavior.
-             // Let's prevent it from these areas for now. Common sources are 0x0000-0xDFFF.
-             // Pandocs: "DMA source cannot be HRAM (FF80-FFFE)" - Let's block FE00+ entirely.
-             println!("Warning: DMA Transfer requested from restricted area {:04X}", source_start_addr);
-             return;
+            // DMA from OAM/IO/HRAM/IE is often restricted or has weird behavior.
+            // Let's prevent it from these areas for now. Common sources are 0x0000-0xDFFF.
+            // Pandocs: "DMA source cannot be HRAM (FF80-FFFE)" - Let's block FE00+ entirely.
+            println!(
+                "Warning: DMA Transfer requested from restricted area {:04X}",
+                source_start_addr
+            );
+            return;
         }
 
         // Use read_byte to respect potential banking / read side effects (though DMA might bypass some?)
@@ -567,7 +590,8 @@ impl MemoryBus {
     }
 
     /// Reads a 16-bit word (Little Endian).
-    pub fn read_word(&mut self, addr: u16) -> u16 { // Mutable because read_byte is mutable
+    pub fn read_word(&mut self, addr: u16) -> u16 {
+        // Mutable because read_byte is mutable
         let low = self.read_byte(addr) as u16;
         let high = self.read_byte(addr.wrapping_add(1)) as u16;
         (high << 8) | low
@@ -590,58 +614,55 @@ impl MemoryBus {
 
     /// Called by the frontend when a key mapped to a Game Boy button is pressed down.
     pub fn key_down(&mut self, key: Keycode) {
-         if self.joypad.key_down(key) {
+        if self.joypad.key_down(key) {
             self.request_interrupt(JOYPAD_INTERRUPT_BIT);
-         }
-         // Update P1 register reflecting the new button state immediately for polling reads
-         let p1_val = self.joypad.read_p1();
-         self.io_registers[(P1_JOYP_ADDR - IO_REGISTERS_START) as usize] = p1_val;
+        }
+        // Update P1 register reflecting the new button state immediately for polling reads
+        let p1_val = self.joypad.read_p1();
+        self.io_registers[(P1_JOYP_ADDR - IO_REGISTERS_START) as usize] = p1_val;
     }
 
     /// Called by the frontend when a key mapped to a Game Boy button is released.
     pub fn key_up(&mut self, key: Keycode) {
         self.joypad.key_up(key);
-         // Update P1 register reflecting the new button state immediately for polling reads
-         let p1_val = self.joypad.read_p1();
-         self.io_registers[(P1_JOYP_ADDR - IO_REGISTERS_START) as usize] = p1_val;
+        // Update P1 register reflecting the new button state immediately for polling reads
+        let p1_val = self.joypad.read_p1();
+        self.io_registers[(P1_JOYP_ADDR - IO_REGISTERS_START) as usize] = p1_val;
     }
 
-     // --- Debug / Accessor methods ---
-     pub fn get_io_reg(&self, addr: u16) -> u8 {
+    // --- Debug / Accessor methods ---
+    pub fn get_io_reg(&self, addr: u16) -> u8 {
         if (IO_REGISTERS_START..=IO_REGISTERS_END).contains(&addr) {
             let offset = (addr - IO_REGISTERS_START) as usize;
             self.io_registers[offset]
         } else if addr == INTERRUPT_ENABLE_REGISTER {
             self.interrupt_enable
-        }
-         else {
+        } else {
             0xFF // Or panic?
         }
-     }
+    }
 
     // Need mutable access to internal IO regs for components like PPU/Timer?
     // Be careful with direct mutation vs using write_byte logic.
     pub fn set_io_reg_direct(&mut self, addr: u16, value: u8) {
-         if (IO_REGISTERS_START..=IO_REGISTERS_END).contains(&addr) {
+        if (IO_REGISTERS_START..=IO_REGISTERS_END).contains(&addr) {
             let offset = (addr - IO_REGISTERS_START) as usize;
             // Direct write, bypasses write_byte logic (use with caution!)
             self.io_registers[offset] = value;
         } else if addr == INTERRUPT_ENABLE_REGISTER {
-             self.interrupt_enable = value & 0x1F;
+            self.interrupt_enable = value & 0x1F;
         }
-         // Add more cases (like IF register?) if needed by other components
+        // Add more cases (like IF register?) if needed by other components
     }
 
     // Getter for VRAM needed by PPU
     pub fn get_vram(&self) -> &[u8; VRAM_SIZE] {
         &self.vram
     }
-     // Getter for OAM needed by PPU
+    // Getter for OAM needed by PPU
     pub fn get_oam(&self) -> &[u8; OAM_SIZE] {
         &self.oam
     }
-
-
 } // impl MemoryBus
 
 // Implement Debug for easier printing/logging

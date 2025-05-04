@@ -1,10 +1,10 @@
+use crate::constants;
 use boba::apu::Apu;
 use boba::cpu::Cpu; // Use Cpu from lib
 use boba::memory_bus::MemoryBus;
 use boba::ppu::Ppu; // Use Ppu from lib
 use std::fs;
-use std::path::Path;
-use crate::constants; // Use constants from sibling module
+use std::path::Path; // Use constants from sibling module
 
 /// Represents the core Game Boy emulator components.
 pub struct Emulator {
@@ -91,7 +91,6 @@ impl Emulator {
 
         Ok(())
     }
-
 
     /// Runs the emulator components for approximately one frame's worth of CPU cycles.
     /// If `stepping` mode is enabled, this function does nothing immediately.

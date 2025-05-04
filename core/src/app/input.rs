@@ -1,7 +1,7 @@
+use boba::memory_bus::MemoryBus;
+use sdl2::EventPump;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::EventPump;
-use boba::memory_bus::MemoryBus;
 
 /// Polls SDL events and updates the MemoryBus joypad state.
 /// Returns `true` if the quit event was received, `false` otherwise.
@@ -10,7 +10,8 @@ pub fn handle_input(event_pump: &mut EventPump, memory_bus: &mut MemoryBus) -> b
         match event {
             Event::Quit { .. }
             | Event::KeyDown {
-                keycode: Some(Keycode::Escape), ..
+                keycode: Some(Keycode::Escape),
+                ..
             } => {
                 println!("Exit requested.");
                 return true; // Signal quit

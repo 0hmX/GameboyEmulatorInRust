@@ -29,7 +29,6 @@ impl RtcRegisters {
         rtc
     }
 
-
     // Basic update based on system time - A real emulator might tie this to internal clock cycles
     pub fn update(&mut self) {
         if (self.dh & RtcRegisters::HALT_BIT) != 0 {

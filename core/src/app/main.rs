@@ -1,12 +1,17 @@
 use sdl2::ttf::Font; // Import Keycode
-use std::{env, path::Path, thread, time::{Duration, Instant}};
+use std::{
+    env,
+    path::Path,
+    thread,
+    time::{Duration, Instant},
+};
 
 // Declare modules located within the src/app/ directory
 mod constants;
-mod sdl_setup;
 mod drawing;
-mod input;
 mod emulator;
+mod input;
+mod sdl_setup;
 
 use emulator::Emulator;
 
@@ -30,7 +35,8 @@ fn main() -> Result<(), String> {
     if !font_path.exists() {
         return Err(format!("Font file not found: {}", constants::FONT_PATH));
     }
-    let font: Font = sdl_context.ttf_context
+    let font: Font = sdl_context
+        .ttf_context
         .load_font(font_path, constants::DEBUG_FONT_SIZE)?;
     println!("Font loaded successfully.");
 
@@ -42,7 +48,8 @@ fn main() -> Result<(), String> {
     let gb_screen_y = 0;
     let disasm_pane_x = (constants::GB_SCREEN_WIDTH + constants::PADDING) as i32;
     let disasm_pane_y = 0;
-    let far_right_pane_x = disasm_pane_x + constants::DISASM_AREA_WIDTH as i32 + constants::PADDING as i32;
+    let far_right_pane_x =
+        disasm_pane_x + constants::DISASM_AREA_WIDTH as i32 + constants::PADDING as i32;
     let vram_view_y = 0;
     let input_view_y = constants::VRAM_VIEW_HEIGHT as i32 + constants::PADDING as i32; // Adjusted based on constants layout
 
@@ -63,8 +70,10 @@ fn main() -> Result<(), String> {
 
         // --- Added: Check for Stepping Control Keys ---
         let keyboard_state = sdl_context.event_pump.keyboard_state();
-        let p_key_currently_pressed = keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::P);
-        let n_key_currently_pressed = keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::N);
+        let p_key_currently_pressed =
+            keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::P);
+        let n_key_currently_pressed =
+            keyboard_state.is_scancode_pressed(sdl2::keyboard::Scancode::N);
 
         let mut step_executed_this_iteration = false;
 
@@ -89,14 +98,13 @@ fn main() -> Result<(), String> {
         n_key_pressed_last_frame = n_key_currently_pressed;
         // --- End Added ---
 
-
         // --- 2. Emulate One Frame (Conditional) ---
         // Only run full frame if not in stepping mode
         if !emulator.stepping {
-             if let Err(e) = emulator.run_frame() {
+            if let Err(e) = emulator.run_frame() {
                 eprintln!("Emulator Error: {}", e);
                 break 'main_loop;
-             }
+            }
         }
         // Note: Single step execution is handled above based on 'N' key press
 
@@ -106,10 +114,11 @@ fn main() -> Result<(), String> {
         // If optimizing: update if !emulator.stepping || step_executed_this_iteration
         emulator.ppu.update_vram_debug_buffer(&emulator.memory_bus);
 
-
         // --- 4. Drawing ---
         // Original logic: Draw every frame, which is correct.
-        sdl_context.canvas.set_draw_color(constants::DEBUG_BACKGROUND_COLOR); // Use consistent background
+        sdl_context
+            .canvas
+            .set_draw_color(constants::DEBUG_BACKGROUND_COLOR); // Use consistent background
         sdl_context.canvas.clear();
 
         // Draw GB Screen
@@ -119,7 +128,7 @@ fn main() -> Result<(), String> {
             gb_screen_x,
             gb_screen_y,
         ) {
-             eprintln!("Error drawing GB screen: {}", e);
+            eprintln!("Error drawing GB screen: {}", e);
         }
 
         // Draw Disassembly - Pass the locally loaded font
@@ -142,18 +151,18 @@ fn main() -> Result<(), String> {
             far_right_pane_x,
             vram_view_y,
         ) {
-             eprintln!("Error drawing VRAM: {}", e);
+            eprintln!("Error drawing VRAM: {}", e);
         }
 
         // Draw Input View
-         // Get the current state directly from the joypad struct within the memory bus
+        // Get the current state directly from the joypad struct within the memory bus
         if let Err(e) = drawing::draw_input_debug(
             &mut sdl_context.canvas,
             &emulator.memory_bus.joypad.get_state(), // Get fresh state
             far_right_pane_x,
             input_view_y,
         ) {
-             eprintln!("Error drawing Input: {}", e);
+            eprintln!("Error drawing Input: {}", e);
         }
 
         sdl_context.canvas.present();
@@ -174,11 +183,11 @@ fn main() -> Result<(), String> {
             }
         } else {
             // Added: If stepping, maybe sleep briefly to avoid maxing CPU when idle
-             if !step_executed_this_iteration { // Avoid sleeping right after stepping
-                 thread::sleep(Duration::from_millis(5)); // Reduce CPU usage while paused
-             }
+            if !step_executed_this_iteration {
+                // Avoid sleeping right after stepping
+                thread::sleep(Duration::from_millis(5)); // Reduce CPU usage while paused
+            }
         }
-
     } // End 'main_loop
 
     println!("Emulator stopped.");

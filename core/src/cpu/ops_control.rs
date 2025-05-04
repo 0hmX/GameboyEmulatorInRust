@@ -1,6 +1,6 @@
 use super::{Cpu, CpuResult, constants::*};
-use crate::memory_bus::MemoryBus;
 use crate::instruction::CB_INSTRUCTIONS;
+use crate::memory_bus::MemoryBus;
 use crate::memory_map;
 use log;
 
@@ -25,7 +25,7 @@ impl Cpu {
         self.pc = self.read_d16(bus);
         Ok(0) // Unconditional JP takes 16 base cycles
     }
-     pub fn op_jp_hl(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_jp_hl(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
         self.pc = self.get_hl();
         Ok(0) // JP HL takes 4 base cycles
     }
@@ -60,13 +60,13 @@ impl Cpu {
     pub fn op_jr_nz_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_jr(!self.get_flag(FLAG_Z), bus)
     }
-     pub fn op_jr_z_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_jr_z_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_jr(self.get_flag(FLAG_Z), bus)
     }
-     pub fn op_jr_nc_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_jr_nc_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_jr(!self.get_flag(FLAG_C), bus)
     }
-     pub fn op_jr_c_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_jr_c_r8(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_jr(self.get_flag(FLAG_C), bus)
     }
 
@@ -87,13 +87,13 @@ impl Cpu {
         self.pc = addr;
         Ok(0) // Unconditional CALL takes 24 base cycles
     }
-     pub fn op_call_nz_a16(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_call_nz_a16(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_call_a16(!self.get_flag(FLAG_Z), bus)
     }
     pub fn op_call_z_a16(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_call_a16(self.get_flag(FLAG_Z), bus)
     }
-     pub fn op_call_nc_a16(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_call_nc_a16(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_call_a16(!self.get_flag(FLAG_C), bus)
     }
     pub fn op_call_c_a16(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
@@ -109,7 +109,7 @@ impl Cpu {
             Ok(0) // Branch not taken costs 0 extra cycles (total 8)
         }
     }
-     pub fn op_ret(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_ret(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.pc = self.pop_word(bus);
         Ok(0) // Unconditional RET takes 16 base cycles
     }
@@ -122,10 +122,10 @@ impl Cpu {
     pub fn op_ret_nc(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_ret(!self.get_flag(FLAG_C), bus)
     }
-     pub fn op_ret_c(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_ret_c(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.conditional_ret(self.get_flag(FLAG_C), bus)
     }
-     pub fn op_reti(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_reti(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
         self.pc = self.pop_word(bus);
         self.ime = true;
         self.ime_scheduled = false;
@@ -138,22 +138,38 @@ impl Cpu {
         self.pc = vector;
         Ok(0) // RST takes 16 base cycles
     }
-     pub fn op_rst_00h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0000, bus) }
-     pub fn op_rst_08h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0008, bus) }
-     pub fn op_rst_10h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0010, bus) }
-     pub fn op_rst_18h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0018, bus) }
-     pub fn op_rst_20h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0020, bus) }
-     pub fn op_rst_28h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0028, bus) }
-     pub fn op_rst_30h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0030, bus) }
-     pub fn op_rst_38h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> { self.rst(0x0038, bus) }
+    pub fn op_rst_00h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0000, bus)
+    }
+    pub fn op_rst_08h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0008, bus)
+    }
+    pub fn op_rst_10h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0010, bus)
+    }
+    pub fn op_rst_18h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0018, bus)
+    }
+    pub fn op_rst_20h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0020, bus)
+    }
+    pub fn op_rst_28h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0028, bus)
+    }
+    pub fn op_rst_30h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0030, bus)
+    }
+    pub fn op_rst_38h(&mut self, bus: &mut MemoryBus) -> CpuResult<u16> {
+        self.rst(0x0038, bus)
+    }
 
     // Misc Control
-     pub fn op_di(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_di(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
         self.ime = false;
         self.ime_scheduled = false;
         Ok(0)
     }
-     pub fn op_ei(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_ei(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
         self.ime_scheduled = true;
         Ok(0)
     }
@@ -201,7 +217,7 @@ impl Cpu {
         self.set_flag(FLAG_N | FLAG_H, true);
         Ok(0)
     }
-     pub fn op_daa(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
+    pub fn op_daa(&mut self, _bus: &mut MemoryBus) -> CpuResult<u16> {
         self.daa();
         Ok(0)
     }

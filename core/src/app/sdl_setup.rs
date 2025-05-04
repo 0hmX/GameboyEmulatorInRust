@@ -1,8 +1,8 @@
-use sdl2::render::{Canvas, TextureCreator};
-use sdl2::video::{Window, WindowContext};
-use sdl2::Sdl;
-use sdl2::ttf::Sdl2TtfContext; // Keep Path for checking
 use crate::constants;
+use sdl2::Sdl;
+use sdl2::render::{Canvas, TextureCreator};
+use sdl2::ttf::Sdl2TtfContext; // Keep Path for checking
+use sdl2::video::{Window, WindowContext};
 
 // No lifetime parameter needed
 pub struct SdlContext {

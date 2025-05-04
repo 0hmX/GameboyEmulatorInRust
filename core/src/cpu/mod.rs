@@ -578,7 +578,7 @@ impl Cpu {
                         {
                             format!("${:+}", d8 as i8)
                         } else {
-                            format!("xb{:02X}", d8)
+                            format!("0b{:02X}", d8)
                         }
                     }
                     3 => {
